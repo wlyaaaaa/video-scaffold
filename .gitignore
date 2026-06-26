@@ -1,0 +1,26 @@
+# secrets
+secret_local.py
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# generated workspace (recreated by the pipeline)
+/raw_audio/
+/srt_data/
+/rendered/
+/scene_html/
+/output/
+/durations.json
+/assets/
+
+# large / copyrighted media (regenerate or supply your own)
+demo/output_scene_switch_4k.mp4
+demo/card.png
+*.webm
+
+# model / hf caches
+.cache/
+*.log

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<!--
+  通用 SVG 底板 / Universal animated SVG base board.
+
+  HOW TO USE (for the AI that fills in a scene):
+  ------------------------------------------------------------------
+  1. Put your scene content inside  <svg id="stage"> ... </svg>  using
+     PLAIN static SVG. Position things with the `transform` ATTRIBUTE on
+     an OUTER <g>. Never animate by hand.
+  2. To animate, add a `data-anim` attribute to an element (ideally an
+     inner <g> that has NO transform attribute of its own):
+
+       data-anim="fade-up"   opacity + rise          (text, panels)
+       data-anim="fade"      opacity only
+       data-anim="fade-left" / "fade-right"          slide + fade
+       data-anim="zoom"      scale 0.92->1 + fade     (badges, hero art)
+       data-anim="draw"      stroke grows from 0      (lines, paths, arrows;
+                             arrowheads via marker-end arrive with the tip)
+       data-anim="type"      逐字平滑淡入             (a <text> element)
+       data-anim="count"     number tweens up         (a <text>; data-to / data-from
+                             / data-decimals / data-prefix / data-suffix)
+       data-anim="float"     无重力悬浮 (continuous)   (game art / panels)
+
+     Timing attributes (seconds, optional):
+       data-delay="0.5"   when it starts
+       data-dur="1.0"     how long the entrance takes
+
+     Frame-perfect narration sync (preferred over data-delay):
+       data-cue="续航能力"   start exactly when this SPOKEN phrase is heard.
+     build_scene.py resolves the phrase against the Whisper word-timeline and
+     rewrites it to data-delay, so the motion lands on the narrated word.
+     (Cue on words that are actually said, not on-screen numerals.)
+
+  3. The renderer drives everything through window.seekTime(t). There is
+     NO requestAnimationFrame — every visual state is a pure function of t,
+     so frame grabs are deterministic and audio-synced.
+
+  Design contract: transparent background, text in 深黛绿 (#0C2B1B),
+  no borders / cards / shadows. Accent lines in 浅绿 (#1F7A4D).
+-->
+<head>
+<meta charset="UTF-8">
+<style>
+  html, body {
+    margin: 0 !important; padding: 0 !important;
+    width: 3840px !important; height: 2160px !important;
+    background: transparent !important; overflow: hidden !important;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { width: 3840px; height: 2160px; display: block; background: transparent; }
+  /* animated nodes pivot around their own box so zoom/float look natural */
+  [data-anim] { transform-box: fill-box; transform-origin: center; }
+</style>
+</head>
+<body>
+
+<svg id="stage" viewBox="0 0 3840 2160" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <defs>
+    <!-- shared celadon palette / soft accent gradient -->
+    <linearGradient id="accent-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1F7A4D"/>
+      <stop offset="100%" stop-color="#7FD1A6"/>
+    </linearGradient>
+    <!-- arrow head for pointer lines: <line ... marker-end="url(#arrow)"> -->
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="8" refY="6"
+            orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,1 L9,6 L0,11 Z" fill="#1F7A4D"/>
+    </marker>
+  </defs>
+
+  <!-- ============================================================= -->
+  <!-- SCENE CONTENT  (the AI replaces everything between the marks) -->
+  <!-- @@SCENE_CONTENT@@ -->
+  <!-- ============================================================= -->
+
+</svg>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * Deterministic animation runtime.                                   *
+ * Pure function of t (seconds). No rAF, no Date.now().               *
+ * ------------------------------------------------------------------ */
+(function () {
+  const easeOut = p => 1 - Math.pow(1 - p, 3);
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+
+  // measured once on load so seekTime stays cheap & deterministic
+  const nodes = [];
+
+  function measure(el) {
+    const kind = el.getAttribute("data-anim");
+    const delay = parseFloat(el.getAttribute("data-delay") || "0");
+    const dur = parseFloat(el.getAttribute("data-dur") || "1");
+    const rec = { el, kind, delay, dur };
+
+    if (kind === "draw") {
+      let len = 0;
+      try { len = el.getTotalLength(); } catch (e) { len = 0; }
+      if (!len && el.tagName === "line") {
+        const dx = el.x2.baseVal.value - el.x1.baseVal.value;
+        const dy = el.y2.baseVal.value - el.y1.baseVal.value;
+        len = Math.hypot(dx, dy);
+      }
+      el.style.strokeDasharray = len;
+      el.style.strokeDashoffset = len;
+      rec.len = len;
+      // arrowheads must arrive WITH the line tip, not float ahead of it:
+      // stash the marker and only re-attach once the stroke is fully drawn.
+      rec.marker = el.getAttribute("marker-end");
+      if (rec.marker) el.removeAttribute("marker-end");
+    }
+
+    if (kind === "count") {
+      rec.from = parseFloat(el.getAttribute("data-from") || "0");
+      rec.to = parseFloat(el.getAttribute("data-to") || "0");
+      rec.dec = parseInt(el.getAttribute("data-decimals") || "0");
+      rec.prefix = el.getAttribute("data-prefix") || "";
+      rec.suffix = el.getAttribute("data-suffix") || "";
+    }
+
+    if (kind === "type") {
+      // split into per-glyph <tspan> for 逐字 reveal without reflow
+      const txt = el.textContent;
+      el.textContent = "";
+      rec.glyphs = [];
+      for (const ch of txt) {
+        const ts = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+        ts.textContent = ch;
+        ts.style.opacity = 0;
+        el.appendChild(ts);
+        rec.glyphs.push(ts);
+      }
+    }
+
+    if (kind !== "draw" && kind !== "type") el.style.opacity = 0;
+    nodes.push(rec);
+  }
+
+  function apply(rec, t) {
+    const { el, kind, delay, dur } = rec;
+    const p = easeOut(clamp01((t - delay) / dur));
+
+    switch (kind) {
+      case "fade":     el.style.opacity = p; break;
+      case "fade-up":  el.style.opacity = p; el.style.transform = `translateY(${(1 - p) * 40}px)`; break;
+      case "fade-left":  el.style.opacity = p; el.style.transform = `translateX(${(1 - p) * -60}px)`; break;
+      case "fade-right": el.style.opacity = p; el.style.transform = `translateX(${(1 - p) * 60}px)`; break;
+      case "zoom":     el.style.opacity = p; el.style.transform = `scale(${0.92 + 0.08 * p})`; break;
+      case "draw":
+        el.style.strokeDashoffset = rec.len * (1 - p);
+        if (rec.marker) {                       // arrowhead appears on arrival
+          if (p >= 0.999) el.setAttribute("marker-end", rec.marker);
+          else el.removeAttribute("marker-end");
+        }
+        break;
+      case "count": {
+        const v = rec.from + (rec.to - rec.from) * p;
+        el.textContent = rec.prefix + v.toFixed(rec.dec) + rec.suffix;
+        el.style.opacity = clamp01((t - delay) / Math.min(dur, 0.4));
+        break;
+      }
+      case "type": {
+        const shown = Math.floor(clamp01((t - delay) / dur) * rec.glyphs.length + 0.0001);
+        rec.glyphs.forEach((g, i) => { g.style.opacity = i < shown ? 1 : 0; });
+        break;
+      }
+      case "float": {
+        // weightless hover: enters once, then drifts forever
+        const fade = clamp01((t - delay) / Math.max(dur, 0.001));
+        const y = Math.sin(t * 0.6) * 18;
+        const r = Math.sin(t * 0.45) * 0.4;
+        el.style.opacity = fade;
+        el.style.transform = `translateY(${y}px) rotate(${r}deg)`;
+        break;
+      }
+    }
+  }
+
+  document.querySelectorAll("[data-anim]").forEach(measure);
+
+  // The renderer calls this for every frame; t is scene-local seconds.
+  window.seekTime = function (t) {
+    for (const rec of nodes) apply(rec, t);
+  };
+
+  window.seekTime(0);
+})();
+</script>
+</body>
+</html>

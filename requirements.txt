@@ -1,0 +1,10 @@
+# Python deps for the video scaffold. Also requires ffmpeg/ffprobe on PATH and
+# a Chrome/Chromium for Playwright (`playwright install chromium`).
+playwright>=1.40
+faster-whisper>=1.0          # BatchedInferencePipeline support
+requests>=2.31
+moderngl>=5.8                # only for demo/render_pipeline.py (background gen)
+numpy>=1.24
+# Windows CUDA for faster-whisper (cuDNN ships with ctranslate2):
+nvidia-cublas-cu12
+nvidia-cuda-runtime-cu12
