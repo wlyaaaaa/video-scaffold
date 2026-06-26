@@ -19,7 +19,7 @@ import pathlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
 from pipeline import (fish_tts, durations as dur_mod, transcribe, build_scene,
-                      render, merge, chapters, cover, cleanup)
+                      render, merge, chapters, cover, cleanup, components as C)
 
 
 def file_uri(path):
@@ -37,69 +37,25 @@ HERO = file_uri(os.path.join(config.DIR_ASSETS, "weapon_01.png"))
 
 
 def scene1_fragment():
-    return f"""
-  <g transform="translate(280,520)">
-    <text data-anim="type" data-cue="传说级武器" data-dur="1.4"
-          font-family="'Source Han Serif CN','Georgia',serif" font-size="200"
-          font-weight="bold" fill="{config.INK}" letter-spacing="6">传说级武器解禁</text>
-    <text data-anim="fade-up" data-delay="0.6" data-dur="1.0"
-          x="6" y="160" font-family="-apple-system,sans-serif" font-size="64"
-          fill="{config.INK}" opacity="0" letter-spacing="10">LEGENDARY  GEAR  REVEAL</text>
-    <line data-anim="draw" data-delay="0.4" data-dur="1.2"
-          x1="6" y1="230" x2="1500" y2="230" stroke="url(#accent-grad)" stroke-width="10"/>
-  </g>
-
-  <g transform="translate(2500,560)">
-    <g data-anim="float" data-cue="硬核装备" data-dur="1.4">
-      <image href="{HERO}" xlink:href="{HERO}" width="980" height="1400"/>
-    </g>
-  </g>
-
-  <line data-anim="draw" data-cue="核心部件" data-dur="0.9" fill="none"
-        x1="1820" y1="980" x2="2440" y2="1060" stroke="{config.ACCENT}"
-        stroke-width="7" marker-end="url(#arrow)"/>
-  <text data-anim="fade" data-cue="核心部件" data-dur="0.6"
-        x="1500" y="975" font-family="-apple-system,sans-serif" font-size="46"
-        fill="{config.INK}" opacity="0" text-anchor="end">核心部件</text>
-"""
-
-
-def _bar(y, label, value, frac, cue):
-    full = 1500 * frac
-    return f"""
-    <g transform="translate(0,{y})">
-      <text data-anim="fade-up" data-cue="{cue}" data-dur="0.6" x="0" y="0"
-            font-family="-apple-system,sans-serif" font-size="56" fill="{config.INK}" opacity="0">{label}</text>
-      <line x1="0" y1="40" x2="1500" y2="40" stroke="{config.INK}" stroke-width="10"
-            stroke-linecap="round" opacity="0.12"/>
-      <line data-anim="draw" data-cue="{cue}" data-dur="1.0" x1="0" y1="40" x2="{full:.0f}" y2="40"
-            stroke="url(#accent-grad)" stroke-width="10" stroke-linecap="round"/>
-      <text data-anim="count" data-to="{value}" data-decimals="1" data-cue="{cue}" data-dur="1.0"
-            x="1500" y="0" font-family="-apple-system,sans-serif" font-size="56" font-weight="bold"
-            fill="{config.ACCENT}" text-anchor="end" opacity="0">0.0</text>
-    </g>"""
+    # built from reusable components (see pipeline/components.py)
+    return (
+        C.title_block("传说级武器解禁", kicker="LEGENDARY  GEAR  REVEAL",
+                      x=280, y=520, cue="传说级武器")
+        + C.hero(HERO, x=2500, y=560, w=980, h=1400, cue="硬核装备")
+        + C.pointer(1820, 980, 2440, 1060, "核心部件", cue="核心部件")
+    )
 
 
 def scene2_fragment():
-    bars = _bar(0, "阻抗强度 / Disruption", "9.5", 0.95, "阻抗强度") \
-         + _bar(220, "展开兼容 / Combo", "8.0", 0.80, "展开兼容") \
-         + _bar(440, "续航能力 / Loop", "9.0", 0.90, "续航能力")
-    return f"""
-  <g transform="translate(300,440)">
-    <text data-anim="type" data-cue="核心数据" data-dur="1.2"
-          font-family="'Source Han Serif CN','Georgia',serif" font-size="150"
-          font-weight="bold" fill="{config.INK}">核心数据全面解析</text>
-    <line data-anim="draw" data-delay="0.4" data-dur="1.0" x1="6" y1="80" x2="1100" y2="80"
-          stroke="url(#accent-grad)" stroke-width="8"/>
-  </g>
-  <g transform="translate(330,900)">{bars}</g>
-
-  <g transform="translate(2650,520)">
-    <g data-anim="float" data-delay="0.6" data-dur="1.6">
-      <image href="{HERO}" xlink:href="{HERO}" width="820" height="1170" opacity="0.96"/>
-    </g>
-  </g>
-"""
+    return (
+        C.title_block("核心数据全面解析", x=300, y=440, cue="核心数据", size=150)
+        + C.stat_panel([
+            ("阻抗强度 / Disruption", "9.5", 0.95, "阻抗强度"),
+            ("展开兼容 / Combo", "8.0", 0.80, "展开兼容"),
+            ("续航能力 / Loop", "9.0", 0.90, "续航能力"),
+        ], x=330, y=900)
+        + C.hero(HERO, x=2650, y=520, w=820, h=1170, cue="续航能力")
+    )
 
 
 def _ensure_demo_hero():

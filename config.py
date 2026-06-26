@@ -57,6 +57,22 @@ INK = "#0C2B1B"           # 深黛绿 primary text
 ACCENT = "#1F7A4D"        # 流光浅绿 accent for lines / arrows
 FADE_SECONDS = 0.5        # per-scene fade in / out
 
+# --- scene transitions ------------------------------------------------------
+# How one scene leaves and the next enters (motion + cross-dissolve through bg).
+TRANSITION = "rise"       # fade | rise | slide-left | slide-right | zoom
+TRANSITION_SECONDS = 0.5
+TRANSITION_SHIFT = 80     # px of travel for rise/slide at 4K
+
+# --- cinematic finishing (baked per-chunk during render) --------------------
+CINEMATIC = True
+VIGNETTE_ANGLE = 0.55     # radians; 0 disables. Gentle corner falloff.
+GRAIN = 4                 # temporal film grain strength; 0 disables.
+
+# --- background music (YOU supply the file) ---------------------------------
+# Drop any audio at BGM_PATH; merge ducks it under the narration automatically.
+BGM_PATH = _p("bgm.mp3")
+BGM_VOLUME = 0.22         # base music level before ducking
+
 # --- Fish Audio TTS ---------------------------------------------------------
 # SECURITY: the key is read from env var FISH_API_KEY, or secret_local.py
 # (git-ignored). Never hard-code it here - this file is committed to GitHub.

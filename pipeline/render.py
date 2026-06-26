@@ -45,13 +45,7 @@ def build_timeline(scene_html_paths, durations):
     """[{html, start, end, fade_in_end, fade_out_start}] in global seconds."""
     timeline, acc = [], 0.0
     for html, d in zip(scene_html_paths, durations):
-        timeline.append({
-            "html": os.path.abspath(html),
-            "start": acc,
-            "end": acc + d,
-            "fade_in_end": acc + min(config.FADE_SECONDS, d / 2),
-            "fade_out_start": acc + d - min(config.FADE_SECONDS, d / 2),
-        })
+        timeline.append({"html": os.path.abspath(html), "start": acc, "end": acc + d})
         acc += d
     return timeline, acc
 
@@ -63,14 +57,26 @@ def _scene_at(timeline, t):
     return timeline[-1]
 
 
-def _opacity_at(scene, t):
-    fi0, fi1 = scene["start"], scene["fade_in_end"]
-    fo0, fo1 = scene["fade_out_start"], scene["end"]
-    if t < fi1 and fi1 > fi0:
-        return max(0.0, (t - fi0) / (fi1 - fi0))
-    if t >= fo0 and fo1 > fo0:
-        return max(0.0, 1.0 - (t - fo0) / (fo1 - fo0))
-    return 1.0
+def _envelope_at(scene, t):
+    """Scene transition: returns (opacity, css_transform) for the body.
+    Each scene eases in at its start and out at its end; adjacent scenes meet at
+    the boundary so the effect is a cross-dissolve (plus motion) through the
+    background. Timing is unchanged, so audio / data-cue sync is preserved."""
+    tr = min(config.TRANSITION_SECONDS, (scene["end"] - scene["start"]) / 2)
+    ein = max(0.0, min(1.0, (t - scene["start"]) / tr)) if tr > 0 else 1.0
+    eout = max(0.0, min(1.0, (scene["end"] - t) / tr)) if tr > 0 else 1.0
+    op = min(ein, eout)
+    s = config.TRANSITION_SHIFT
+    typ = config.TRANSITION
+    if typ == "rise":
+        return op, f"translateY({(1 - ein) * s - (1 - eout) * s:.1f}px)"
+    if typ == "slide-left":
+        return op, f"translateX({(1 - ein) * s - (1 - eout) * s:.1f}px)"
+    if typ == "slide-right":
+        return op, f"translateX({-(1 - ein) * s + (1 - eout) * s:.1f}px)"
+    if typ == "zoom":
+        return op, f"scale({0.97 + 0.03 * ein:.3f})"
+    return op, ""   # "fade"
 
 
 async def _worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg_dur, chunk_frames):
@@ -107,12 +113,19 @@ async def _worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg
             bg_offset = chunk_start_t % bg_dur          # <-- loop the background
             chunk_out = os.path.join(config.DIR_OUTPUT, f"_chunk_{chunk_idx:05d}.mp4")
 
+            # cinematic finishing baked in-line (parallel across chunks)
+            vfilter = "[0:v][1:v]overlay=0:0:shortest=1"
+            if config.CINEMATIC:
+                if config.VIGNETTE_ANGLE > 0:
+                    vfilter += f",vignette=angle={config.VIGNETTE_ANGLE}"
+                if config.GRAIN > 0:
+                    vfilter += f",noise=alls={config.GRAIN}:allf=t"
             cmd = [
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                 "-stream_loop", "-1", "-ss", f"{bg_offset:.3f}", "-t", f"{chunk_dur:.3f}",
                 "-i", config.BG_VIDEO,
                 "-f", "image2pipe", "-vcodec", "png", "-r", str(config.FPS), "-i", "-",
-                "-filter_complex", "[0:v][1:v]overlay=0:0:shortest=1",
+                "-filter_complex", vfilter,
                 "-c:v", config.VCODEC, *config.NVENC_EXTRA, "-cq", config.CQ,
                 "-an", "-threads", "2", chunk_out,
             ]
@@ -124,9 +137,11 @@ async def _worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg
                     scene = _scene_at(timeline, t)
                     t_local = t - scene["start"]
                     page = pages[scene["html"]]
-                    op = _opacity_at(scene, t)
+                    op, tf = _envelope_at(scene, t)
                     await page.evaluate(
-                        f"if(window.seekTime) window.seekTime({t_local}); document.body.style.opacity={op};")
+                        f"if(window.seekTime) window.seekTime({t_local});"
+                        f"document.body.style.opacity={op};"
+                        f"document.body.style.transform='{tf}';")
                     png = await page.screenshot(type="png", omit_background=True)
                     proc.stdin.write(png)
                     proc.stdin.flush()

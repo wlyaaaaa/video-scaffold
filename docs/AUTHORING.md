@@ -58,3 +58,23 @@
 ```
 
 `<defs>` 已内置 `accent-grad`（渐变）与 `arrow`（箭头 marker），直接引用即可。
+
+## 优先用组件（pipeline/components.py）
+能用组件就别手写，保证一致与高级感。每个函数返回一段合规片段：
+- `title_block(main, kicker, sub, x, y, cue)` 大标题块（逐字+下划线）
+- `stat_panel([(label, value, frac, cue), ...], x, y)` 数据条面板（数字滚动+进度条）
+- `stat_bar(label, value, frac, y, cue)` 单条数据
+- `quote(lines, x, y, cue)` 引用块
+- `pointer(x1,y1,x2,y2,label,cue)` 指示箭头+标签
+- `hero(image_uri, x, y, w, h, cue)` 悬浮原画
+- `lower_third(title, sub, cue)` 无边框名条
+- `end_card(main, sub, cue)` 居中封底
+
+示例（一个场景由组件拼成）：
+```python
+from pipeline import components as C
+frag = (C.title_block("核心数据全面解析", cue="核心数据", size=150)
+        + C.stat_panel([("阻抗强度","9.5",0.95,"阻抗强度"),
+                        ("续航能力","9.0",0.90,"续航能力")], x=330, y=900)
+        + C.hero(hero_uri, cue="续航能力"))
+```

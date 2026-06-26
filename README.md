@@ -45,15 +45,17 @@ pipeline/
   durations.py    # 2.2 ffprobe 精确浮点时长 -> durations.json
   transcribe.py   # 2.1 faster-whisper large-v3 词级时间轴（音画同步用）
   author.py       # 3.1 组装大模型 Prompt（script+srt+asset+规范）
+  components.py   # 可复用场景组件（标题/数据条/引用/指示箭头/封底…）
   build_scene.py  # 3.2/4a 片段嵌底板 + 解析 data-cue -> scene_html/scene_NN.html
-  render.py       # 4 逐帧抓取前景叠加到「循环」4K 背景 (NVENC AV1)
-  merge.py        # 5 配音拼接 + 合成 final_output.mp4
+  render.py       # 4 逐帧抓取前景叠加到「循环」4K 背景 + 转场 + 电影感 (NVENC AV1)
+  merge.py        # 5 配音拼接 + BGM 闪避混音 + 合成 final_output.mp4
   cover.py        # 6a 4K 矢量封面 -> output/cover.png
   chapters.py     # 6b B站章节 output/chapters.txt
   cleanup.py      # 6c/6d 临时清理 + 就绪自检
 docs/AUTHORING.md # 写给 AI 的场景创作指南
 docs/VOICE.md     # Fish 情感/音效标记指南
 run_demo.py       # 端到端示例（也是各阶段如何调用的活文档）
+init_project.py   # 从模板一键拷出一个干净新项目
 ```
 
 逐项目产物（自动生成、git-ignored、可随时删）：
@@ -122,6 +124,18 @@ marker（用 `marker-end="url(#arrow)"`）。
 9. `cover.build(标题,...)`、`chapters.write(...)`、`cleanup.cleanup()` + `cleanup.verify()`。
 
 ---
+
+## 成片质感
+
+- **可复用组件**（`pipeline/components.py`）：`title_block` / `stat_panel` / `stat_bar`
+  / `quote` / `pointer` / `hero` / `lower_third` / `end_card`，都返回符合设计契约的
+  SVG 片段，AI 几行调用即可拼出一致、高级的场景（demo 即用它们搭的）。
+- **场景转场**（`config.TRANSITION`）：`rise`(默认) / `slide-left·right` / `zoom` / `fade`，
+  在场景边界做带位移的交叉溶解；时序不变，**不破坏音画/词级同步**。
+- **电影感收尾**（`config.CINEMATIC`）：渲染时逐切片就地叠加极淡暗角 `vignette` +
+  时间性胶片颗粒 `noise`，并行无额外串行 pass。
+- **BGM 闪避**（你提供音乐）：把任意音频放到 `config.BGM_PATH`（默认 `bgm.mp3`），
+  `merge.mux` 自动循环垫乐、用 sidechain 在旁白处压低音乐、并在结尾淡出。
 
 ## 音画同步怎么做到「分毫不差」（两层）
 
