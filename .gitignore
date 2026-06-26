@@ -7,7 +7,7 @@ __pycache__/
 .venv/
 venv/
 
-# generated workspace (recreated by the pipeline)
+# per-project workspace (recreated by the pipeline; not part of the scaffold)
 /raw_audio/
 /srt_data/
 /rendered/
@@ -15,12 +15,14 @@ venv/
 /output/
 /durations.json
 /assets/
+/scripts/
 
-# large / copyrighted media (regenerate or supply your own)
-demo/output_scene_switch_4k.mp4
-demo/card.png
-*.webm
+# backup archive (built into the project dir)
+video-scaffold-backup.zip
 
-# model / hf caches
+# misc
 .cache/
 *.log
+
+# claude code local settings
+.claude/

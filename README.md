@@ -28,11 +28,17 @@ demo 用 Fish Audio **免费模型** `s2.1-pro-free` + **央视音色** referenc
 
 ## 目录结构
 
+通用部分（入库、可复用；区别于一次性的逐项目产物）：
 ```
 config.py                  # ⭐ 集中声明式配置，先读这里
 secret_local.py            # API key（git-ignored，不入库）
 templates/scene_base.html  # ⭐ 通用 SVG 底板 + 声明式动画运行时
 templates/cover_base.html  # 4K 矢量封面底板
+background/
+  background_4k.mp4         # 通用 4K 60s 无缝循环流体玻璃背景（所有视频共用）
+  fluid_glass.comp         # 背景着色器源码
+  render_background.py      # 背景生成器（改着色器后重渲）
+examples/sample_hero.png    # demo 占位原画（版权干净）
 pipeline/
   prep.py         # 0.2/1.1 资产扫描 + 文案自动切片
   fish_tts.py     # 1.2 文案 -> Fish Audio 央视配音 (raw_audio/audio_NN.mp3)
@@ -48,8 +54,18 @@ pipeline/
 docs/AUTHORING.md # 写给 AI 的场景创作指南
 docs/VOICE.md     # Fish 情感/音效标记指南
 run_demo.py       # 端到端示例（也是各阶段如何调用的活文档）
-assets/ scripts/ raw_audio/ srt_data/ scene_html/ rendered/ output/
 ```
+
+逐项目产物（自动生成、git-ignored、可随时删）：
+```
+assets/ scripts/ raw_audio/ srt_data/ scene_html/ rendered/ output/  durations.json
+```
+
+### 复用脚手架 / 重渲背景
+- **开新视频**：直接在本目录放素材跑流程；或解压 `video-scaffold-backup.zip` / 拷贝整个
+  目录作为干净模板（逐项目产物都是 git-ignored，复制后即空白工作区）。
+- **换背景**：改 `background/fluid_glass.comp` 后 `python background/render_background.py`
+  重渲 `background/background_4k.mp4`（~90s@5080）；所有视频自动共用新背景。
 
 ---
 

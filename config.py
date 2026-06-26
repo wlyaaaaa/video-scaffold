@@ -5,7 +5,12 @@ Central, declarative configuration for the video scaffold.
 Everything that the AI or a human might tweak per-project lives here so the
 pipeline modules stay generic. Read this file first to understand a project.
 
-Directory layout (created on demand by the pipeline):
+Universal (committed) parts:
+    config.py / pipeline/ / templates/ / docs/ / run_demo.py
+    background/     the seamless 4K loop + its shader/generator (reused by all videos)
+    examples/       placeholder art for the demo
+
+Per-project workspace (generated, git-ignored, created on demand):
     assets/        game art / images, named freely and referenced by scenes
     scripts/       script_01.txt .. script_NN.txt  (one paragraph per scene)
     raw_audio/     audio_01.mp3 .. audio_NN.mp3     (TTS output)
@@ -30,8 +35,9 @@ HEIGHT = 2160
 FPS = 60
 
 # --- background -------------------------------------------------------------
-# A short seamless-loop clip. The renderer loops it to cover any duration.
-BG_VIDEO = _p("demo", "background_4k_sdr.mp4")
+# Universal seamless-loop clip (regenerate with background/render_background.py).
+# The renderer loops it to cover any duration.
+BG_VIDEO = _p("background", "background_4k.mp4")
 
 # --- encode (RTX 5080 hardware AV1) -----------------------------------------
 # Chunks ARE the final quality (concat is stream-copy), so invest here.

@@ -107,7 +107,7 @@ def _ensure_demo_hero():
     empty (e.g. a fresh git clone, since assets/ is git-ignored)."""
     dst = os.path.join(config.DIR_ASSETS, "weapon_01.png")
     if not os.path.exists(dst):
-        shutil.copy(os.path.join(config.ROOT, "demo", "sample_hero.png"), dst)
+        shutil.copy(os.path.join(config.ROOT, "examples", "sample_hero.png"), dst)
 
 
 def main():
