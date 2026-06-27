@@ -111,7 +111,7 @@ def _chunk_cmd(bg_offset, chunk_dur, chunk_out):
             vfilter += f",noise=alls={config.GRAIN}:allf=t"
     return [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-        "-stream_loop", "-1", "-ss", f"{bg_offset:.3f}", "-t", f"{chunk_dur:.3f}",
+        "-stream_loop", "-1", "-ss", f"{bg_offset:.3f}",
         "-i", config.BG_VIDEO,
         "-f", "image2pipe", "-vcodec", "png", "-r", str(config.FPS), "-i", "-",
         "-filter_complex", vfilter,
