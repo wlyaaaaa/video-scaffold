@@ -533,7 +533,9 @@ def main():
     if stage in ("chapters", "all"):
         write_chapters()
     if stage in ("render", "all"):
-        render.render_timeline(scenes, _durs())   # workers from config.NUM_WORKERS (=4)
+        # Allow overriding worker count from command line, e.g., python build_v2.py render 2
+        workers = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else None
+        render.render_timeline(scenes, _durs(), num_workers=workers)
     # NOTE: render writes a SILENT video track (output/video_track.mp4, -an by
     # design). The sound lives in output/final_output.mp4, produced by muxing
     # narration + ducked BGM here. `render` now falls through to merge too, so a
