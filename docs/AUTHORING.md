@@ -39,6 +39,20 @@
 | `split-push` | vs 分屏从中缝推开 | `data-side="left\|right"` `data-gap` |
 | `push` | 截图肯·伯恩斯推镜 | `data-sc0/tx0/ty0/sc1/tx1/ty1` `data-origin` |
 | `xfade` | 反向淡出（截图间） | `data-delay` `data-dur` |
+
+**高级 FX 原语（AE 级；全是 `t` 的纯函数，详见 [`ADVANCED_FX.md`](ADVANCED_FX.md)）：**
+| 值 | 效果 | 额外属性 |
+|---|---|---|
+| `holo-3d` | 3D 全息看板翻转滑入 | `data-rx0/ry0/rx1/ry1` `data-persp` |
+| `morph` | 矢量路径顺滑形变（重采样，无需 GSAP） | `data-to="#id"` `data-samples` `data-close` |
+| `flow-blob` | 资金流体融合（配 `filter="url(#goo)"`） | `data-path="#id"` `data-speed` `data-phase` `data-x0/y0` |
+| `burst` | 重力粒子炸裂（种子在 Python 端定，零运行时随机） | `data-vx/vy/g/life/spin` |
+| `shockwave` | 印章/落锤冲击波环 | `data-max` |
+| `flip` | 游戏王卡牌翻转揭示 | `data-ry0` `data-persp` |
+| `pulse` | 呼吸辉光（最优/最划算徽章） | `data-amp` `data-spd` `data-opmin` |
+| `drift` | 氛围浮尘缓慢游走 | `data-ax/ay` `data-fx/fy` `data-px/py` `data-op` |
+> 优先调 `v2lib` 现成组件（`holo_panel`/`morph_path`/`gooey_flow`/`num_burst`/`convert`/
+> `discount_seal`/`pulse_badge`/`card_flip`/`lock_unlock`/`ambient_motes`），别手写。
 > 组件库见 `E:\video\v2lib.py`（栅格/6级字号/对比条/对照表/账本/时间轴/流程令牌/截图聚焦/天平…）。
 > 制作脚本 `E:\video\build_v2.py`。cue 解析已支持中文数字→阿拉伯数字归一（Whisper 把数字转成阿拉伯）。
 

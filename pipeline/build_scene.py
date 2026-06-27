@@ -47,8 +47,12 @@ def _char_index(words):
     """
     text, times = [], []
     for w in words:
-        chars = [c for c in w["word"] if not c.isspace()]
-        n = max(len(chars), 1)
+        # Strip punctuation like commas, periods, question marks from words for robust alignment
+        clean_word = re.sub(r'[^\w\s]', '', w["word"])
+        chars = [c for c in clean_word if not c.isspace()]
+        if not chars:
+            continue
+        n = len(chars)
         span = w["end"] - w["start"]
         for k, c in enumerate(chars):
             text.append(c)

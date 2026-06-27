@@ -55,7 +55,9 @@ pipeline/
   cover.py        # 6a 4K 矢量封面 -> output/cover.png（通用底板）
   chapters.py     # 6b B站章节 output/chapters.txt（+ 实拍项目的 章节管理.txt）
   cleanup.py      # 6c/6d 临时清理 + 就绪自检
-docs/AUTHORING.md # 写给 AI 的场景创作指南
+docs/AI_GUIDE.md  # ⭐ 写给 AI 的单一入口（改文案/排版/动效只读这份，别通读源码）
+docs/ADVANCED_FX.md # 高级动效备忘录（3D全息/路径形变/流体融合/粒子炸裂…直接调用）
+docs/AUTHORING.md # 写给 AI 的场景创作指南（动画原语清单）
 docs/VOICE.md     # Fish 情感/音效标记指南
 run_demo.py       # 端到端示例（也是各阶段如何调用的活文档）
 init_project.py   # 从模板一键拷出一个干净新项目

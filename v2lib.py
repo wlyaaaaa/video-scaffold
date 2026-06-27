@@ -30,6 +30,57 @@ T = {0:(220,700,INK,1), 1:(150,700,INK,1), 2:(100,700,INK,1),
 ASSETS = config.DIR_ASSETS
 def FU(name): return pathlib.Path(os.path.join(ASSETS, name)).as_uri()
 
+
+def _probe_img_header(path):
+    """Read pixel (width,height) straight from a PNG/JPEG header — no Pillow needed.
+    Lets a new project drop fresh art in assets/ without hand-filling DIMS."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(32)
+            if head[:8] == b"\x89PNG\r\n\x1a\n":           # PNG: IHDR at byte 16
+                import struct
+                w, h = struct.unpack(">II", head[16:24])
+                return int(w), int(h)
+            if head[:2] == b"\xff\xd8":                    # JPEG: scan SOF markers
+                f.seek(2)
+                while True:
+                    b = f.read(1)
+                    while b and b != b"\xff":
+                        b = f.read(1)
+                    marker = f.read(1)
+                    while marker == b"\xff":
+                        marker = f.read(1)
+                    if not marker:
+                        break
+                    if 0xC0 <= marker[0] <= 0xCF and marker[0] not in (0xC4, 0xC8, 0xCC):
+                        f.read(3)                          # length(2) + precision(1)
+                        h = int.from_bytes(f.read(2), "big")
+                        w = int.from_bytes(f.read(2), "big")
+                        return w, h
+                    seg = int.from_bytes(f.read(2), "big")
+                    f.seek(seg - 2, 1)
+    except Exception:
+        pass
+    return None
+
+
+def img_dims(name):
+    """Pixel size of an asset. Hand-tuned DIMS (EXIF-corrected) win; otherwise the
+    size is probed from the file header automatically, so swapping in a new
+    project's assets needs zero DIMS edits."""
+    if name in DIMS:
+        return DIMS[name]
+    dims = _probe_img_header(os.path.join(ASSETS, name))
+    if dims:
+        return dims
+    try:
+        from PIL import Image
+        with Image.open(os.path.join(ASSETS, name)) as im:
+            return im.size
+    except Exception:
+        pass
+    raise KeyError(f"unknown image dims for {name!r}; add it to v2lib.DIMS")
+
 # real pixel sizes (EXIF-corrected)
 DIMS = {
  "1249日元某宝截图.jpg":(1440,844), "Google大师决斗-1美刀优惠券.jpg":(1440,461),
@@ -86,9 +137,9 @@ def rule(x, y, w, cue=None, delay=0.5, dur=0.9, color=None):
     return (f'<line data-anim="draw" {_t(cue,delay,dur)} x1="{x}" y1="{y}" x2="{x+w}" y2="{y}" '
             f'stroke="{color}" stroke-width="8"/>')
 
-def kicker(s, x, y, cue=None, delay=0.2, color=None):
+def kicker(s, x, y, cue=None, delay=0.2, color=None, anim="fade-up"):
     color = color or ACCENT
-    return text(s, x, y, lvl=4, cue=cue, delay=delay, anim="fade-up", fill=color, opacity=1, weight=700, ls=10)
+    return text(s, x, y, lvl=4, cue=cue, delay=delay, anim=anim, fill=color, opacity=1, weight=700, ls=10)
 
 def title(main, x=M, y=470, lvl=1, kick=None, cue=None, delay=0.3, serif=True, under=True):
     out = []
@@ -123,7 +174,7 @@ def strike(x, y, w, cue=None, delay=0.6, dur=0.5, color=None):
 
 # ---- image (big, with gentle ken-burns push) ------------------------------
 def image(name, x, y, w=None, h=None, anim="wipe", cue=None, delay=0.4, dur=1.0, dir="left"):
-    iw, ih = DIMS[name]; ar = iw/ih
+    iw, ih = img_dims(name); ar = iw/ih
     if h and not w: w = int(h*ar)
     elif w and not h: h = int(w/ar)
     if anim == "wipe":
@@ -134,7 +185,7 @@ def image(name, x, y, w=None, h=None, anim="wipe", cue=None, delay=0.4, dur=1.0,
 
 def push_image(name, x, y, w=None, h=None, cue=None, delay=0.0, dur=8.0, zoom=1.10, dx=-80, dy=-40, origin=None):
     """big screenshot with a slow ken-burns push over the scene."""
-    iw, ih = DIMS[name]; ar = iw/ih
+    iw, ih = img_dims(name); ar = iw/ih
     if h and not w: w = int(h*ar)
     elif w and not h: h = int(w/ar)
     ox = origin[0] if origin else x + w//2; oy = origin[1] if origin else y + h//2
@@ -323,8 +374,8 @@ def flow_token(nodes, x=M, y=1100, gap=560, delay=0.8, token_label="¥"):
     # token rides an invisible straight path across the chain
     x0, x1 = pts[0], pts[-1]
     out.append(f'<path id="ftpath" d="M{x0},{y-160} L{x1},{y-160}" fill="none" stroke="{INK}" stroke-opacity="0.0"/>')
-    td=delay+len(nodes)*0.5
-    out.append(f'<g transform="translate({x0},{y-160})"><g data-anim="move-along" data-path="#ftpath" data-x0="{x0}" data-y0="{y-160}" {_t(None,td,2.0)}>'
+    last_cue = cues[-1]
+    out.append(f'<g transform="translate({x0},{y-160})"><g data-anim="move-along" data-path="#ftpath" data-x0="{x0}" data-y0="{y-160}" {_t(last_cue,0.5,2.0)}>'
                f'<circle cx="0" cy="0" r="46" fill="{GOLD}"/>'
                f'<text x="0" y="20" font-family="{SANS}" font-size="46" font-weight="700" fill="#fff" text-anchor="middle">{token_label}</text></g></g>')
     return "".join(out)
@@ -384,3 +435,198 @@ def end_card(main, sub, cue=None, delay=0.4):
             f'<line data-anim="draw" data-delay="{delay+0.5:.2f}" data-dur="1.0" x1="-340" y1="130" x2="340" y2="130" stroke="url(#accent-grad)" stroke-width="10"/>'
             f'<text data-anim="fade-up" data-delay="{delay+0.9:.2f}" data-dur="1.0" x="0" y="250" text-anchor="middle" '
             f'font-family="{SANS}" font-size="{T[3][0]}" fill="{INK}" letter-spacing="6">{esc(sub)}</text></g>')
+
+
+# ============================================================================
+#  ADVANCED FX (AE 级硬核动效) · 全部是 t 的纯函数，零 rAF/随机/Date.now —— 渲染
+#  时 render.py 每帧 seekTime(t) 抓图，掉帧不可能发生。运行时实现见
+#  templates/scene_base.html 的 holo-3d / morph / flow-blob / burst 四个 case。
+#  这套是 OPT-IN 的"科技/全息"风格，允许半透明边框+辉光（区别于默认回形针极简契约）。
+#  详见 docs/ADVANCED_FX.md。
+# ============================================================================
+import random as _rng_mod
+
+
+def holo(inner_svg, cue=None, delay=0.3, dur=1.1, rx=18, ry=-14, settle=True):
+    """① 3D 全息数据看板：把任意 SVG 片段当成一块平面，带空间纵深感翻转滑入镜头。
+    settle=True 落定为正面可读；settle=False 停在轻微倾角(更"全息"但牺牲可读性)。
+    inner_svg 用绝对 viewBox 坐标书写；绕其外接盒中心做 3D 旋转。"""
+    rx1, ry1 = (0, 0) if settle else (round(rx * 0.4, 1), round(ry * 0.4, 1))
+    return (f'<g data-anim="holo-3d" {_t(cue,delay,dur)} '
+            f'data-rx0="{rx}" data-ry0="{ry}" data-rx1="{rx1}" data-ry1="{ry1}">{inner_svg}</g>')
+
+
+def holo_panel(title, items, x=M, y=560, w=2400, cue=None, delay=0.4,
+               rx=16, ry=-12, settle=True, accent=None):
+    """① 现成的全息看板：半透明青瓷框 + 发光数据条，整块带纵深翻入。
+    items: [(label, value, frac, suffix)]。frac∈[0,1] 决定条长。"""
+    accent = accent or ACCENT
+    rows = len(items); h = 250 + rows * 150; track = w - 760
+    parts = [
+        f'<rect x="{x}" y="{y-130}" width="{w}" height="{h}" rx="30" '
+        f'fill="{accent}" fill-opacity="0.05" stroke="{accent}" stroke-opacity="0.34" stroke-width="3"/>',
+        text(title, x + 56, y - 34, lvl=3, delay=delay + 0.1, anim="fade", fill=accent, opacity=1, weight=700),
+        rule(x + 56, y + 12, w - 112, delay=delay + 0.2),
+    ]
+    for i, (label, val, frac, suf) in enumerate(items):
+        ry_ = y + 140 + i * 150; d = delay + 0.3 + i * 0.12; bw = int(track * max(0.0, min(1.0, frac)))
+        parts.append(text(label, x + 56, ry_, lvl=3, delay=d, anim="fade-left"))
+        parts.append(f'<rect x="{x+520}" y="{ry_-56}" width="{track}" height="66" rx="14" fill="{INK}" fill-opacity="0.08"/>')
+        parts.append(f'<g transform="translate({x+520},{ry_-56})"><rect data-anim="grow-bar" data-grow="x" '
+                     f'data-delay="{d+0.1:.2f}" data-dur="0.9" x="0" y="0" width="{bw}" height="66" rx="14" fill="{accent}"/></g>')
+        parts.append(num(val, x + 520 + track + 34, ry_, lvl=3, delay=d + 0.2, dur=0.9, suffix=suf,
+                         fill=accent, anchor="start", dec=(1 if isinstance(val, float) else 0)))
+    return holo("".join(parts), cue=cue, delay=delay, dur=1.1, rx=rx, ry=ry, settle=settle)
+
+
+def morph_path(from_d, to_d, x=CX, y=CY, cue=None, delay=0.4, dur=1.2,
+               stroke=None, sw=10, fill="none", close=False, samples=120):
+    """② 矢量路径顺滑形变：from_d 流体般扭曲重组成 to_d（节点数可不同，运行时按
+    弧长重采样插值，无需 GSAP MorphSVG）。两段 d 写在同一 translate(x,y) 局部坐标里。"""
+    stroke = stroke or ACCENT
+    tid = "morphT%d" % (abs(hash((from_d, to_d, x, y))) % 100000)
+    closeattr = ' data-close="1"' if close else ''
+    return (f'<g transform="translate({x},{y})">'
+            f'<path id="{tid}" d="{to_d}" style="opacity:0" fill="{fill}" stroke="none"/>'
+            f'<path data-anim="morph" data-to="#{tid}" data-samples="{samples}"{closeattr} '
+            f'{_t(cue,delay,dur)} d="{from_d}" fill="{fill}" stroke="{stroke}" '
+            f'stroke-width="{sw}" stroke-linecap="round" stroke-linejoin="round"/></g>')
+
+
+def gooey_flow(pts, cue=None, delay=0.5, n=5, r=46, color=None, speed=0.22,
+               pipe=True, pipe_op=0.12):
+    """③ 资金流向·流体融合：n 个金球在管道(pts 折线)里流动，靠近彼此时像水银互相
+    吸引拉伸融合(goo 滤镜)。pts: [(x,y), ...] 描述管线；强化"资金流转/闭环"观感。"""
+    color = color or GOLD
+    pid = "goo%d" % (abs(hash(tuple(map(tuple, pts)))) % 100000)
+    d = "M" + " L".join(f"{px},{py}" for px, py in pts)
+    out = []
+    if pipe:
+        out.append(f'<path d="{d}" fill="none" stroke="{INK}" stroke-opacity="{pipe_op}" '
+                   f'stroke-width="{int(r*1.7)}" stroke-linecap="round" stroke-linejoin="round"/>')
+    out.append(f'<path id="{pid}" d="{d}" fill="none" stroke="none"/>')
+    out.append('<g filter="url(#goo)">')
+    x0, y0 = pts[0]
+    for i in range(n):
+        out.append(f'<circle data-anim="flow-blob" data-path="#{pid}" data-phase="{i/float(n):.3f}" '
+                   f'data-speed="{speed}" data-x0="{x0}" data-y0="{y0}" {_t(cue,delay,0.5)} '
+                   f'cx="{x0}" cy="{y0}" r="{r}" fill="{color}"/>')
+    out.append('</g>')
+    return "".join(out)
+
+
+def particle_burst(x, y, cue=None, delay=0.0, n=110, colors=None, rmin=6, rmax=20,
+                   vmin=900, vmax=2300, life=1.25, g=1500, up_bias=0.35, seed=None):
+    """④ 多巴胺终结·粒子炸裂：以(x,y)为中心爆发上百颗带重力抛物线的金色微粒。
+    所有随机量在 Python 端用固定种子生成 => 运行时零随机 => 逐帧抓图完全确定。"""
+    colors = colors or [GOLD, "#E8C46A", ACCENT, "#FFFFFF"]
+    rng = _rng_mod.Random(seed if seed is not None else (abs(hash((x, y, n))) & 0xffffffff))
+    out = [f'<g transform="translate({x},{y})">']
+    for _ in range(n):
+        ang = rng.uniform(0, 2 * math.pi); spd = rng.uniform(vmin, vmax)
+        vx = math.cos(ang) * spd; vy = math.sin(ang) * spd - up_bias * spd
+        r = rng.uniform(rmin, rmax); col = rng.choice(colors)
+        lf = life * rng.uniform(0.7, 1.1); spin = rng.uniform(-220, 220)
+        out.append(f'<circle data-anim="burst" {_t(cue, delay + rng.uniform(0,0.04), lf)} '
+                   f'data-vx="{vx:.0f}" data-vy="{vy:.0f}" data-g="{g}" data-life="{lf:.2f}" '
+                   f'data-spin="{spin:.0f}" cx="0" cy="0" r="{r:.1f}" fill="{col}"/>')
+    out.append('</g>')
+    return "".join(out)
+
+
+def num_burst(value, x, y, lvl=0, cue=None, delay=0.1, dur=1.0, prefix="", suffix="",
+              dec=0, comma=False, fill=None, anchor="middle", n=120, burst_color=None):
+    """④ 组合糖：核心数字滚动到位的刹那，在数字坐标爆出粒子。把 num + particle_burst
+    挂同一个 cue，粒子在数字 count 结束(delay+dur)瞬间引爆。"""
+    fill = fill or GOLD
+    number = num(value, x, y, lvl=lvl, cue=cue, delay=delay, dur=dur, prefix=prefix,
+                 suffix=suffix, dec=dec, comma=comma, fill=fill, anchor=anchor)
+    burst = particle_burst(x, y - int(T[lvl][0] * 0.30), cue=cue, delay=delay + dur * 0.92,
+                           n=n, colors=([burst_color] if burst_color else None))
+    return number + burst
+
+
+# ---- MD-genre advanced devices (币种/折扣/卡牌/锁/金币/氛围) -------------------
+def convert(a_val, a_unit, b_val, b_unit, x=M, y=1000, cue=None, delay=0.3,
+            factor="÷0.04207", lvl=1, a_fill=None, b_fill=None, comma=True):
+    """币种换算条：左值(人民币¥) —[factor]→ 右值(日元¥)，两个数字滚动 + 中间换算箭头。
+    专治本系列"币种铁律"——截图标人民币、旁白讲日元，观众要看得见换算。"""
+    a_fill = a_fill or INK; b_fill = b_fill or GOLD
+    aw = 760; gap = 560
+    return (
+        num(a_val, x, y, lvl=lvl, cue=cue, delay=delay, dur=0.8, prefix="¥",
+            dec=(2 if isinstance(a_val, float) else 0), comma=comma, fill=a_fill)
+        + text(factor, x + aw, y - 70, lvl=4, cue=cue, delay=delay + 0.25, anim="fade", fill=ACCENT, opacity=1, weight=700, anchor="middle")
+        + arrow(x + aw - 150, y - 26, x + aw + 150, y - 26, cue=cue, delay=delay + 0.35, dur=0.4)
+        + text("≈", x + aw + 200, y, lvl=lvl, cue=cue, delay=delay + 0.45, anim="fade", fill=b_fill)
+        + num(b_val, x + aw + gap, y, lvl=lvl, cue=cue, delay=delay + 0.5, dur=0.9, prefix="¥",
+              suffix=" " + b_unit, dec=(2 if isinstance(b_val, float) else 0), comma=comma, fill=b_fill)
+    )
+
+
+def discount_seal(s, x=CX, y=CY, cue=None, delay=0.4, fill=None, lvl=1, rings=3):
+    """折扣大印章：印章盖下的同时炸出几圈冲击波环（"74.8折""7.27折"砸出冲击力）。"""
+    fill = fill or RED
+    out = []
+    for i in range(rings):
+        out.append(f'<g transform="translate({x},{y})"><circle data-anim="shockwave" data-max="9" '
+                   f'{_t(cue, delay + 0.18 + i*0.12, 0.9)} cx="0" cy="0" r="120" fill="none" '
+                   f'stroke="{fill}" stroke-width="{10-i*2}" stroke-opacity="0.7"/></g>')
+    out.append(stamp(s, x, y, lvl=lvl, cue=cue, delay=delay, fill=fill))
+    return "".join(out)
+
+
+def pulse_badge(s, x=CX, y=CY, cue=None, delay=0.4, lvl=2, fill=None, glow=None):
+    """脉冲高亮徽章：一圈呼吸辉光 + 文字，适合标"当前最优/最划算/亲测可行"。"""
+    fill = fill or ACCENT; glow = glow or fill
+    halfw = int(_text_w(s, T[lvl][0]) / 2) + 70
+    return (f'<g transform="translate({x},{y})">'
+            f'<rect data-anim="pulse" data-amp="0.05" data-spd="3.2" data-opmin="0.18" {_t(cue,delay,0.6)} '
+            f'x="{-halfw}" y="-86" width="{halfw*2}" height="150" rx="74" fill="{glow}" fill-opacity="0.16"/>'
+            f'<rect data-anim="fade" {_t(cue,delay+0.05,0.5)} x="{-halfw}" y="-86" width="{halfw*2}" height="150" rx="74" '
+            f'fill="none" stroke="{fill}" stroke-width="4"/>'
+            f'{text(s, 0, 18, lvl=lvl, cue=cue, delay=delay+0.1, anim="fade", fill=fill, anchor="middle", weight=700)}</g>')
+
+
+def card_flip(inner_svg, x=CX, y=CY, cue=None, delay=0.4, dur=0.9, ry0=-105):
+    """游戏王卡牌翻转揭示：inner_svg 像一张卡从立边翻到正面（本系列主题契合）。
+    inner_svg 用以(x,y)为原点的局部坐标书写。"""
+    return (f'<g transform="translate({x},{y})">'
+            f'<g data-anim="flip" data-ry0="{ry0}" {_t(cue,delay,dur)}>{inner_svg}</g></g>')
+
+
+def coin_fountain(x=CX, y=1500, cue=None, delay=0.0, n=70, token="¥"):
+    """金币喷泉：偏上抛、慢重力的金色"硬币"喷出（充值/到账/收益的金钱感）。
+    复用确定性 burst 引擎，只是调参更"币"。"""
+    return particle_burst(x, y, cue=cue, delay=delay, n=n, colors=[GOLD, "#E8C46A", "#F2D98A"],
+                          rmin=14, rmax=30, vmin=700, vmax=1700, life=1.6, g=1100, up_bias=0.62,
+                          seed=abs(hash((x, y, token))) & 0xffff)
+
+
+# closed-padlock and open-padlock outlines (same node budget) for market unlock
+_LOCK_SHUT = "M-70,-10 L70,-10 L70,120 L-70,120 Z M-46,-10 L-46,-58 A46,46 0 0 1 46,-58 L46,-10"
+_LOCK_OPEN = "M-70,-10 L70,-10 L70,120 L-70,120 Z M-46,-10 L-46,-58 A46,46 0 0 1 46,-58 L46,-92"
+def lock_unlock(x=CX, y=CY, cue=None, delay=0.4, dur=1.0, color=None):
+    """令牌/市场解锁：闭锁的锁梁顺滑morph成开锁（15天解锁市场、绑令牌→可交易）。"""
+    color = color or ACCENT
+    return morph_path(_LOCK_SHUT, _LOCK_OPEN, x=x, y=y, cue=cue, delay=delay, dur=dur,
+                      stroke=color, sw=12, samples=80)
+
+
+def ambient_motes(n=26, cue=None, delay=0.0, color=None, area=None, seed=7):
+    """背景氛围浮尘：n 颗缓慢游走的光点，给场景加"高级氛围"而不抢戏（全 t 纯函数）。
+    area=(x0,y0,x1,y1) 限定范围，默认右侧空域，避开左侧文字。"""
+    color = color or ACCENT
+    x0, y0, x1, y1 = area or (2200, 300, 3680, 1900)
+    rng = _rng_mod.Random(seed)
+    out = []
+    for _ in range(n):
+        cx = rng.uniform(x0, x1); cy = rng.uniform(y0, y1); r = rng.uniform(3, 11)
+        ax = rng.uniform(18, 46); ay = rng.uniform(22, 60)
+        fx = rng.uniform(0.18, 0.55); fy = rng.uniform(0.15, 0.5)
+        px = rng.uniform(0, 6.28); py = rng.uniform(0, 6.28); op = rng.uniform(0.18, 0.5)
+        out.append(f'<g transform="translate({cx:.0f},{cy:.0f})"><circle data-anim="drift" '
+                   f'data-ax="{ax:.0f}" data-ay="{ay:.0f}" data-fx="{fx:.2f}" data-fy="{fy:.2f}" '
+                   f'data-px="{px:.2f}" data-py="{py:.2f}" data-op="{op:.2f}" {_t(cue,delay,0.8)} '
+                   f'cx="0" cy="0" r="{r:.1f}" fill="{color}"/></g>')
+    return "".join(out)

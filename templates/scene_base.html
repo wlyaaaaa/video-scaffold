@@ -34,7 +34,12 @@
 
   3. The renderer drives everything through window.seekTime(t). There is
      NO requestAnimationFrame — every visual state is a pure function of t,
-     so frame grabs are deterministic and audio-synced.
+     so frame grabs are deterministic and audio-synced. ANY new anim MUST stay
+     a pure function of t (seed randomness in Python, read it from data-* here).
+
+  Advanced FX primitives (3D holo / path morph / gooey fluid / particle burst /
+  shockwave / card flip / pulse / drift) live in measure()/apply() below and are
+  driven by v2lib helpers — see docs/ADVANCED_FX.md.
 
   Design contract: transparent background, text in 深黛绿 (#0C2B1B),
   no borders / cards / shadows. Accent lines in 浅绿 (#1F7A4D).
@@ -67,6 +72,20 @@
             orient="auto" markerUnits="userSpaceOnUse">
       <path d="M0,1 L9,6 L0,11 Z" fill="#1F7A4D"/>
     </marker>
+    <!-- gooey/metaball filter: blobs under <g filter="url(#goo)"> fuse like
+         mercury when they touch. Used by data-anim="flow-blob" (资金流体融合). -->
+    <filter id="goo" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="18" result="blur"/>
+      <feColorMatrix in="blur" mode="matrix"
+        values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 26 -11" result="goo"/>
+      <feComposite in="SourceGraphic" in2="goo" operator="atop"/>
+    </filter>
+    <!-- soft golden glow for particle bursts / holographic accents -->
+    <radialGradient id="spark-grad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFE9A8"/>
+      <stop offset="55%" stop-color="#C29638"/>
+      <stop offset="100%" stop-color="#C29638" stop-opacity="0"/>
+    </radialGradient>
   </defs>
 
   <!-- ============================================================= -->
@@ -88,6 +107,20 @@
   const lerp = (a, b, p) => a + (b - a) * p;
   // clean overshoot: rises to 1.12 then settles exactly to 1.0 (no jitter)
   const popScale = p => p < 0.7 ? lerp(0.6, 1.12, p/0.7) : lerp(1.12, 1.0, (p-0.7)/0.3);
+
+  // sample any <path>/<line> into N equally-spaced [x,y] points. Lets us morph
+  // between two shapes with different node counts (no GSAP MorphSVG needed) and
+  // keep it a pure function of t.
+  function samplePath(el, N) {
+    let L = 0; try { L = el.getTotalLength(); } catch (e) { L = 0; }
+    const pts = [];
+    for (let i = 0; i < N; i++) {
+      const f = N <= 1 ? 0 : i / (N - 1);
+      let pt; try { pt = el.getPointAtLength(L * f); } catch (e) { pt = { x: 0, y: 0 }; }
+      pts.push([pt.x, pt.y]);
+    }
+    return pts;
+  }
 
   // measured once on load so seekTime stays cheap & deterministic
   const nodes = [];
@@ -167,9 +200,61 @@
     if (kind === "tilt") { rec.to = parseFloat(el.getAttribute("data-to") || "0"); el.style.transformOrigin = "center center"; }
     if (kind === "split-push") { rec.side = el.getAttribute("data-side") || "left"; rec.gap = parseFloat(el.getAttribute("data-gap") || "200"); }
 
+    // ---- advanced FX (all pure functions of t) -------------------------------
+    if (kind === "holo-3d") {            // 3D holographic dashboard flip-in
+      rec.rx0 = parseFloat(el.getAttribute("data-rx0") || "18");
+      rec.ry0 = parseFloat(el.getAttribute("data-ry0") || "-14");
+      rec.rx1 = parseFloat(el.getAttribute("data-rx1") || "0");
+      rec.ry1 = parseFloat(el.getAttribute("data-ry1") || "0");
+      rec.persp = parseFloat(el.getAttribute("data-persp") || "1800");
+    }
+    if (kind === "morph") {              // vector path morph (resampled, dependency-free)
+      rec.N = parseInt(el.getAttribute("data-samples") || "120");
+      rec.close = el.getAttribute("data-close") === "1";
+      const tgt = document.querySelector(el.getAttribute("data-to") || "\\0");
+      rec.from = samplePath(el, rec.N);
+      rec.to = tgt ? samplePath(tgt, rec.N) : rec.from;
+      if (tgt) tgt.style.opacity = 0;    // keep target measurable but invisible
+    }
+    if (kind === "flow-blob") {          // gooey blobs riding a looped pipe path
+      rec.path = document.querySelector(el.getAttribute("data-path") || "\\0");
+      rec.len = rec.path ? rec.path.getTotalLength() : 0;
+      rec.speed = parseFloat(el.getAttribute("data-speed") || "0.22");
+      rec.phase = parseFloat(el.getAttribute("data-phase") || "0");
+      rec.x0 = parseFloat(el.getAttribute("data-x0") || "0");
+      rec.y0 = parseFloat(el.getAttribute("data-y0") || "0");
+    }
+    if (kind === "burst") {              // gravity particle (seeded in Python => deterministic)
+      rec.vx = parseFloat(el.getAttribute("data-vx") || "0");
+      rec.vy = parseFloat(el.getAttribute("data-vy") || "0");
+      rec.g = parseFloat(el.getAttribute("data-g") || "1500");
+      rec.life = parseFloat(el.getAttribute("data-life") || "1.2");
+      rec.spin = parseFloat(el.getAttribute("data-spin") || "0");
+    }
+    if (kind === "shockwave") rec.maxs = parseFloat(el.getAttribute("data-max") || "8");
+    if (kind === "flip") {               // Yu-Gi-Oh card flip-in reveal
+      rec.ry0 = parseFloat(el.getAttribute("data-ry0") || "-100");
+      rec.persp = parseFloat(el.getAttribute("data-persp") || "1600");
+    }
+    if (kind === "pulse") {              // breathing neon glow (continuous)
+      rec.amp = parseFloat(el.getAttribute("data-amp") || "0.06");
+      rec.spd = parseFloat(el.getAttribute("data-spd") || "3.0");
+      rec.opmin = parseFloat(el.getAttribute("data-opmin") || "0.45");
+    }
+    if (kind === "drift") {              // ambient mote (seeded wander, continuous)
+      rec.ax = parseFloat(el.getAttribute("data-ax") || "30");
+      rec.ay = parseFloat(el.getAttribute("data-ay") || "40");
+      rec.fx = parseFloat(el.getAttribute("data-fx") || "0.5");
+      rec.fy = parseFloat(el.getAttribute("data-fy") || "0.4");
+      rec.px = parseFloat(el.getAttribute("data-px") || "0");
+      rec.py = parseFloat(el.getAttribute("data-py") || "0");
+      rec.op = parseFloat(el.getAttribute("data-op") || "0.5");
+    }
+
     // these manage their own opacity via apply(); only zero out the simple fades
     const SELF = ["draw","type","trace-dot","grow-bar","draw-area","wipe",
-                  "highlight-sweep","move-along","play-head","tilt","push","fade-out","xfade"];
+                  "highlight-sweep","move-along","play-head","tilt","push","fade-out","xfade","kicker-zoom",
+                  "holo-3d","morph","flow-blob","burst","shockwave","flip","pulse","drift"];
     if (!SELF.includes(kind)) el.style.opacity = 0;
     nodes.push(rec);
   }
@@ -184,6 +269,29 @@
       case "fade-left":  el.style.opacity = p; el.style.transform = `translateX(${(1 - p) * -60}px)`; break;
       case "fade-right": el.style.opacity = p; el.style.transform = `translateX(${(1 - p) * 60}px)`; break;
       case "zoom":     el.style.opacity = p; el.style.transform = `scale(${0.92 + 0.08 * p})`; break;
+      case "kicker-zoom": {
+        let opacity = 1;
+        if (t < delay) {
+          opacity = 0;
+        } else if (t < delay + 0.5) {
+          opacity = (t - delay) / 0.5;
+        }
+        let s = 2.2;
+        let tx = 578;
+        let ty = -2.4;
+        const start_shrink = delay + 2.5;
+        const shrink_dur = 2.0;
+        if (t > start_shrink) {
+          const w = easeInOut(Math.min(1.0, (t - start_shrink) / shrink_dur));
+          s = 2.2 + (1.0 - 2.2) * w;
+          tx = 578 + (0 - 578) * w;
+          ty = -2.4 + (0 - (-2.4)) * w;
+        }
+        el.style.opacity = opacity;
+        el.style.transformOrigin = "0 0";
+        el.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
+        break;
+      }
       case "draw":
         el.style.strokeDashoffset = rec.len * (1 - p);
         if (rec.marker) {                       // arrowhead appears on arrival
@@ -240,7 +348,7 @@
         break;
       }
       case "move-along": {
-        el.style.opacity = 1;
+        el.style.opacity = t < delay ? 0 : 1;
         if (rec.path) { try { const pt = rec.path.getPointAtLength(rec.len*p); el.style.transform = `translate(${pt.x-rec.x0}px,${pt.y-rec.y0}px)`; } catch(e){} }
         break;
       }
@@ -250,6 +358,73 @@
       case "push": {
         const q = easeInOut(clamp01((t-delay)/dur)); el.style.opacity = 1;
         el.style.transform = `translate(${lerp(rec.tx0,rec.tx1,q)}px,${lerp(rec.ty0,rec.ty1,q)}px) scale(${lerp(rec.sc0,rec.sc1,q)})`;
+        break;
+      }
+
+      // ---- advanced FX (Chrome renders these during deterministic frame-grab) --
+      case "holo-3d": {            // flips in from a tilted plane, settles readable
+        const q = easeOut(clamp01((t-delay)/dur));
+        const rx = lerp(rec.rx0, rec.rx1, q), ry = lerp(rec.ry0, rec.ry1, q);
+        el.style.opacity = clamp01(q*1.6);
+        el.style.transform = `perspective(${rec.persp}px) rotateX(${rx}deg) rotateY(${ry}deg) translateZ(${(1-q)*-260}px)`;
+        break;
+      }
+      case "morph": {              // interpolate every resampled node, rebuild d
+        const q = easeInOut(clamp01((t-delay)/dur));
+        let d = "";
+        for (let i = 0; i < rec.N; i++) {
+          const a = rec.from[i], b = rec.to[i];
+          d += (i ? "L" : "M") + lerp(a[0],b[0],q).toFixed(2) + " " + lerp(a[1],b[1],q).toFixed(2) + " ";
+        }
+        if (rec.close) d += "Z";
+        el.setAttribute("d", d);
+        el.style.opacity = clamp01((t-delay)/0.3);
+        break;
+      }
+      case "flow-blob": {          // loops along the pipe; goo filter fuses neighbours
+        if (t < delay) { el.style.opacity = 0; break; }
+        el.style.opacity = 1;
+        if (rec.path && rec.len) {
+          let f = (t-delay)*rec.speed + rec.phase; f -= Math.floor(f);
+          try { const pt = rec.path.getPointAtLength(rec.len*f);
+            el.style.transform = `translate(${(pt.x-rec.x0).toFixed(2)}px,${(pt.y-rec.y0).toFixed(2)}px)`; } catch(e){}
+        }
+        break;
+      }
+      case "burst": {              // x=vx·t, y=vy·t+½g·t²  (gravity parabola), fades as it dies
+        if (t < delay) { el.style.opacity = 0; break; }
+        const tt = t - delay, u = clamp01(tt/rec.life);
+        const x = rec.vx*tt, y = rec.vy*tt + 0.5*rec.g*tt*tt;
+        el.style.opacity = (1-u)*(1-u);
+        el.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) rotate(${(rec.spin*tt).toFixed(1)}deg) scale(${(1-0.5*u).toFixed(3)})`;
+        break;
+      }
+      case "shockwave": {          // ring expands outward and fades (印章/落锤冲击)
+        const p = clamp01((t-delay)/dur);
+        el.style.opacity = (1-p) * (t < delay ? 0 : 1);
+        el.style.transform = `scale(${(0.2 + p*rec.maxs).toFixed(3)})`;
+        break;
+      }
+      case "flip": {               // card flips onto the field, hidden while edge-on
+        const q = easeOut(clamp01((t-delay)/dur));
+        const ry = lerp(rec.ry0, 0, q);
+        el.style.opacity = (t < delay || Math.abs(ry) > 88) ? 0 : 1;
+        el.style.transform = `perspective(${rec.persp}px) rotateY(${ry.toFixed(2)}deg)`;
+        break;
+      }
+      case "pulse": {              // gentle breathing glow for a "best deal" halo
+        const inP = clamp01((t-delay)/Math.max(dur,0.001));
+        const s = Math.sin(t*rec.spd);
+        el.style.opacity = inP * (rec.opmin + (1-rec.opmin)*0.5*(1+s));
+        el.style.transform = `scale(${(1 + rec.amp*s).toFixed(4)})`;
+        break;
+      }
+      case "drift": {              // ambient mote wander (seeded phase per particle)
+        const inP = clamp01((t-delay)/0.8);
+        const x = rec.ax*Math.sin(t*rec.fx + rec.px);
+        const y = rec.ay*Math.sin(t*rec.fy + rec.py);
+        el.style.opacity = inP * rec.op;
+        el.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px)`;
         break;
       }
     }

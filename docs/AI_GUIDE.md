@@ -1,112 +1,120 @@
-# AI 开发指引 · 游戏王MD视频生成脚手架开发规约 (AI Guide)
+# AI 开发指引 · 视频生成脚手架（单一入口）
 
-本文件是为 AI 编码助手（如 Gemini, Claude, Cursor 等）编写的**免源码通读开发参考指南**。
-当需要 AI 协助修改文案、调整排版、修补音画同步或重组场景时，**直接向 AI 喂入此文档即可，无需让其通读 build_v2.py 或 pipeline/ 目录**。
+> **这是给 AI 编码助手的唯一必读文档。** 要改文案/排版/分镜/动效/音画同步，
+> **只读这一份就够了，不要再去通读 `build_v2.py` / `v2lib.py` / `pipeline/`**——
+> 那只会浪费上下文。需要更深的动效细节看 [`ADVANCED_FX.md`](ADVANCED_FX.md)，
+> 配音标记看 [`VOICE.md`](VOICE.md)。代码现状稳定、无已知 bug，别去"找 bug 式"通读。
 
----
-
-## 1. 项目目录与文件职责 (Project Map)
-
-*   `config.py`: 全局静态配置（画布分辨率、FPS、渲染线程数、Whisper热词表）。
-*   `build_v2.py`: **主业务逻辑**。包含场景数据 `SCENES`、章节划分 `CHAPTER_GROUPS` 以及每个场景 `s00` - `s21` 的组件拼接逻辑。修改排版和内容均在此文件。
-*   `v2lib.py` (`import v2lib as L`): **排版核心组件库**。声明了画布常量和所有渲染组件。
-*   `templates/scene_base.html`: 动画与网页底座。定义了各种入场/退场动效（如 `fade-up`, `stamp`, `draw`, `fade-out`）的 JS 运行逻辑。
-*   `docs/VOICE.md`: 配音情感和停顿标记说明。
+下一期大概率还是同风格（游戏王 MD · 回形针式数据讲解 · 无字幕）。流程完全复用。
 
 ---
 
-## 2. 画布与设计系统常量 (Design System)
+## 0. 黄金法则（先记这几条）
 
-在 `v2lib.py` 中定义，在 `build_v2.py` 中直接作为全局变量使用：
-*   **分辨率**: 宽 `WIDTH = 3840`，高 `HEIGHT = 2160` (标准的 4K UHD 画布)。
-*   **坐标参考点**: Center X `CX = 1920`，Center Y `CY = 1080`，左边边距 `M = 240`。
-*   **调色盘**:
-    *   `INK = "#0C2B1B"`: 主文本字色（深黛绿）。
-    *   `ACCENT = "#1F7A4D"`: 高亮/线条/箭头颜色（流光浅绿）。
-    *   `RED = "#A83232"`: 负面/警示颜色。
-    *   `GOLD = "#C29638"`: 特殊奖励/亮点颜色。
-*   **字号层级 (`T[lvl][0]`)**:
-    *   `lvl=0` (200px, 巨幕标语) | `lvl=1` (130px, 场景标题) | `lvl=2` (96px, 重点字) | `lvl=3` (68px, 正文说明) | `lvl=4` (52px, 次要小字)。
+1. **只写一小段静态 SVG 片段**，时间轴动画交给底板运行时（`scene_base.html` 的 `seekTime(t)`）。
+2. **一切动效是 `t` 的纯函数**：底板**没有 rAF**，`render.py` 每帧 `seekTime(t)` 后抓图，
+   所以确定、同步、不掉帧。加新动效也必须守这条（随机量在 Python 端用固定种子预生成）。
+3. **能用组件就别手写**：`v2lib.py`（`import v2lib as L`）已封装全部排版/动效组件。
+4. **改完先 `build` 看 0 WARN，再 `preview` 肉眼验，最后才 `render`**。渲染是唯一耗时步骤。
+5. **配音齐全时别强制重配**：`tts`/`timing` 现已幂等，`all` 会自动跳过；要重配音才 `tts force`。
 
 ---
 
-## 3. 音画同步机制与 Cue 纠偏规则 (A/V Sync & Cueing)
+## 1. 项目地图（文件职责）
 
-### 3.1 踩点机制
-组件中的 `cue="关键字"` 代表该组件会在音频中**念出此字词的那一瞬间**开始播放动画。
-它的原理是：运行时 JS 引擎拿着 `cue` 里的词，去 `srt_data/` 的词级时间轴 JSON 里查找其开始时间（例如第 `1.24s`），然后在渲染第 `1.24s` 帧时准时启动网页中对应的 SVG 动画。
-
-### 3.2 ⚠️ 拼音与多音字纠偏（两步法）
-Whisper 语音转写可能会因为同音字/缩写产生识别偏差，此时**不要修改音频，也不要修改网页显示的文本**，只需修改 `cue` 绑定的 key 以对准 Whisper 转写的错字：
-*   *例 1*：配音念“免费钻”（有偿钻的钻），Whisper 转写为“免费赚”。
-    **解决方案**：组件属性改为 `cue="免费赚"`，屏幕显示的文本依然保持 `L.pop("免费钻", ...)`。
-*   *例 2*：配音念“代充”，Whisper 在第 5 场景中转写为“代冲”。
-    **解决方案**：改写为 `cue="代冲"`。
-
-*常见的 Whisper 转写纠偏速查*：
-*   `有偿` / `无偿` ➔ `有长` / `无长`
-*   `免费钻` ➔ `免费赚`
-*   `代充` ➔ `代冲`
-*   `正题` ➔ `阵题`
-*   `绿卡` ➔ `日卡`
-*   `到余额` ➔ `倒余额` 或 `到余额` (以 `srt_*.json` 为准)
+| 文件 | 职责 |
+|---|---|
+| `config.py` | 全局静态配置（分辨率/FPS/线程/Whisper 热词/Fish 模型/BGM 音量）。 |
+| `build_v2.py` | **主业务**：场景数据 `SCENES`、章节 `CHAPTER_GROUPS`、每个 `sNN_*()` 场景的组件拼接、CLI 驱动。**改内容/排版在这里。** |
+| `v2lib.py` (`as L`) | **组件库**：画布常量 + 全部排版/动效组件（含 8 个高级 FX）。 |
+| `templates/scene_base.html` | 动画底板 + 确定性运行时（`measure()`/`apply()`/`seekTime`）。所有 `data-anim` 原语在此。 |
+| `pipeline/` | 各阶段实现（tts/durations/transcribe/build_scene/render/merge/preview/chapters/cleanup）。**通常不用读。** |
+| `assets/` | 实拍截图/原画（换项目时整批替换；像素尺寸自动探测，无需手填）。 |
 
 ---
 
-## 4. 排版核心组件库定义 (v2lib.py API)
+## 2. 设计系统常量（`v2lib.py` 定义，`build_v2.py` 直接用）
 
-所有 API 均支持 `cue`（时间轴绑定）和 `delay`（相对该 `cue` 的额外延迟，单位为秒）。
-
-### 4.1 基础文本与装饰
-*   `L.title(s, x, y, lvl=1, kick="", cue=None, delay=0.3)`: 场景大标题。
-*   `L.text(s, x, y, lvl=3, cue=None, delay=0.3, dur=0.7, anim="fade-up", fill=None, anchor="start", weight=600)`: 基础文本（支持 `fade-up`, `fade-left`, `fade-out` 等动画）。
-*   `L.pop(s, x, y, lvl=2, cue=None, delay=0.0, fill=None, anchor="start")`: 弹出缩放文本（常用于警示、数据强调，默认带气泡回弹特效）。
-*   `L.num(val, x, y, lvl=1, cue=None, delay=0.1, dur=1.0, prefix="", suffix="", dec=0, fill=None)`: 滚动数字特效。
-*   `L.strike(x, y, w, cue=None, delay=0.45, color=RED)`: 删除线（划掉某个价格）。
-*   `L.rule(x, y, w, delay=0.3, color=INK)`: 分割横线。
-
-### 4.2 结构化组件
-*   `L.image(name, x, y, w, h=None, anim="wipe", cue=None, delay=0.3)`: 插入 `assets/` 目录下的图片。
-*   `L.hl_box(x, y, w, h, cue=None, delay=0.0, color=ACCENT)`: 红/绿圈高亮框，用于在游戏截图上框选出重点（如框住“自动收货”按钮）。
-*   `L.chip(s, x, y, lvl=3, cue=None, delay=0.0, color=None)`: 带边框的胶囊药丸文本，用于强调标签或小贴士。
-*   `L.compare_table(headers, rows, x, y, colw, row_h=130, delay=0.6, hi_col=None)`: 数据对比表格。
-    *   `colw`: 各列宽度的数组，如 `[820, 560, 900, 920]`。
-*   `L.flow_token(nodes, x=M, y=1100, gap=560, delay=0.8, token_label="¥")`: 流程链与行驶的金币动画。
-    *   `nodes`: 格式为 `[(节点文案, 踩点cue, 是否高亮ACCENT)]`。
-*   `L.checklist(title_s, items, x=M, y=560, delay=0.6, lvl=3)`: 带复选勾动画的清单。
-    *   `items`: 格式为 `[(清单文案, 踩点cue)]`。
-*   `L.balance(left_label, left_items, right_label, right_items, tilt_to=8, x=CX, y=1240, beam=2400, delay=0.8)`: 称重天平组件。
-    *   `tilt_to`: 倾斜角度，正数向右倾，负数向左倾。
-*   `L.stamp(s, x, y, lvl=1, cue=None, delay=0.5, fill=None)`: 红色/绿色复古大图章（如“通过”、“翻车”）。
-*   `L.end_card(main, sub, cue=None, delay=0.4)`: 视频结尾黑屏拉线与鸣谢卡。
+- **画布**：`WIDTH=3840 HEIGHT=2160`（4K UHD）。中心 `CX=1920 CY=1080`，左边距 `M=240`。
+- **调色盘语义**：`INK=#0C2B1B` 墨绿正文 / `ACCENT=#1F7A4D` 浅绿(好·结论·线/箭头) /
+  `RED=#C0392B` 代价·警示 / `GOLD=#B8862F` 钱。
+- **6 级字号** `T[lvl][0]`：`0`=220 巨幕 / `1`=150 标题 / `2`=100 重点 / `3`=64 正文 /
+  `4`=44 次要 / `5`=32 最小。
+- **前景设计契约**：背景透明、墨绿文字、强调线浅绿；**默认禁边框/卡片/阴影/毛玻璃**、留白克制。
+  （例外：`ADVANCED_FX.md` 的"全息/科技"风组件是 opt-in，允许半透明框+辉光；封面也允许重视觉。）
 
 ---
 
-## 5. 开发日常流命令 (CLI Guide)
+## 3. 音画同步 & Cue 纠偏（关键）
 
-当 AI 助手完成代码修改后，引导用户顺序执行以下命令以完成本地部署和生产发布：
+`cue="关键词"` = 该组件在旁白**念到这个词的那一帧**才开始动。原理：运行时拿 `cue` 去
+`srt_data/srt_NN.json`（Whisper 词级时间轴）查开始秒，重写成 `data-delay`。
 
-1.  **编译网页底版**:
-    ```bash
-    python build_v2.py build
-    ```
-    *AI 注意*：如果提示 `WARN cue not found`，说明你的 `cue` 写错了，请按照 **第 3 节** 的纠偏规则修正 `cue` 的中文字，重新执行此命令，直到警告清零。
+**两步法消除 `WARN cue not found`（成片应做到 0 WARN）：**
+1. **热词引导（首选）**：把专业词加进 `config.WHISPER_INITIAL_PROMPT`，重跑 `timing force`，纠正 90%+ 同音错字。
+2. **对齐 Whisper 实输出（兜底）**：仍错就把 `cue` 改成 Whisper 实际转写的字（**只动 cue，不动屏幕文本/配音**）。去 `srt_data/srt_NN.json` 看实际词。
 
-2.  **极速自检预览 (不花时间的验证)**:
-    ```bash
-    python build_v2.py preview
-    ```
-    运行后引导用户双击双开 [output/preview.html](file:///E:/video/output/preview.html)，这能在浏览器里以 1:1 的高真度和完全一致的配音时间轴，以毫秒为单位播放所有的网页动效，用于肉眼检查排版是否越界。
+常见纠偏：`有偿/无偿→有长/无长`，`免费钻→免费赚`，`代充→代冲`，`正题→阵题`，`盗刷→倒刷`，`某鱼→某于`。
 
-3.  **渲染出片（GPU并发加速 + 智能断点续传）**:
-    ```bash
-    python build_v2.py render
-    ```
-    *   此步骤会自动调用 **断点续传**，若仅修改了部分场景且大部分分片已生成，系统将只重渲染被更改/损坏的分片，几秒钟内便可极速拼接完毕。
-    *   最终成品输出在 `output/final_output.mp4`，背景音乐和侧链压缩闪避混音会自动完成。
+**注意**：只能 cue 旁白**真说出来**的词，不能 cue 纯屏幕数字（"9.5"念"九点五"，cue 它前面的词）。
+中文数字会自动归一成阿拉伯（"三十六"↔"36" 都能命中）。标题只 cue 开头一两秒说到的词，别 cue 靠后的词（会迟出被正文抢跑）。
 
-4.  **B站章节大纲**:
-    ```bash
-    python build_v2.py chapters
-    ```
-    运行后可直接去根目录下复制 `章节管理.txt` 中的章节，直接粘贴至 B站 视频章节栏中。
+---
+
+## 4. `v2lib` 组件 API（`import v2lib as L`）
+
+所有函数都支持 `cue=`（踩点）和 `delay=`（兜底秒）。
+
+**基础原子**：`text / type_in / num(滚动数字,可 comma 千分位) / pop(弹出) / kicker / title /
+rule(分割线) / chip(药丸) / strike(删除线) / sweep(荧光扫) / arrow / hl_box(高亮框) / callout`。
+
+**结构化设备**：
+- `image(name,x,y,w/h,anim="wipe",cue)` 插 `assets/` 图（**尺寸自动探测**）；`push_image(...)` 缓推镜；`hero_feather(...)` 羽化融进背景的原画。
+- `compare_table(headers,rows,colw,hi_col)` 对比表（可高亮"我们"列）。
+- `bar_race(rows)` 条形竞赛；`ledger(title,items,total)` 账本逐行；`checklist(title,items)` 勾选清单。
+- `flow_token(nodes)` 流程链+金币行驶；`timeline_scrub(nodes)` 时间轴扫播；`balance(...)` 天平。
+- `stamp(s)` 大图章；`end_card(main,sub)` 封底。
+
+**高级 FX（详见 [`ADVANCED_FX.md`](ADVANCED_FX.md)）**：
+- `holo_panel(title,items)` / `holo(inner)` —— ① 3D 全息数据看板
+- `morph_path(from_d,to_d)` / `lock_unlock()` —— ② 矢量路径形变
+- `gooey_flow(pts)` —— ③ 资金流向流体融合
+- `num_burst(val,...)` / `particle_burst()` / `coin_fountain()` —— ④ 粒子炸裂/金币喷泉
+- `convert(a,"RMB",b,"日元")` 币种换算 · `discount_seal("74.8折")` 折扣印章+冲击波 ·
+  `pulse_badge("当前最优")` 脉冲徽章 · `card_flip(inner)` 卡牌翻转 · `ambient_motes()` 氛围浮尘
+
+---
+
+## 5. CLI（`python build_v2.py <stage>`）
+
+| 阶段 | 作用 |
+|---|---|
+| `doctor` | 渲染前体检：ffmpeg/ffprobe/背景/Fish key/playwright/assets 就绪？（**长渲染前先跑**） |
+| `scripts` | 把 `SCENES` 的旁白写成 `scripts/script_NN.txt` |
+| `tts` | 旁白→Fish 配音（**幂等**：配音齐全自动跳过；`tts force` 强制重配） |
+| `timing` | ffprobe 时长 + Whisper 词级转写（`all` 里 srt 齐全则跳过；`timing force` 强转） |
+| `build` | 片段嵌底板 → `scene_html/`（**改了文案/分镜先跑这个，盯 0 WARN**） |
+| `preview` | 生成 `output/preview.html`，浏览器逐场景**动态**自检（渲染前必看） |
+| `cover` | 渲染 `output/cover.png`(16:9) 与 `cover_4x3.png` |
+| `chapters` | 生成 `output/chapters.txt` 与 `章节管理.txt`（B 站章节，直接粘贴） |
+| `render` | 逐帧抓取叠背景 → `video_track.mp4`，**自动接 merge** 出带声音成片（4 worker + 帧校验，约 80–90min） |
+| `merge` | 配音拼接 + BGM 侧链闪避 → `output/final_output.mp4` |
+| `verify` | 核对成片/封面已生成且非空 |
+| `cleanup` | 清临时分片/中间产物 |
+| `ship` | verify 通过则 cleanup，一键收尾 |
+| `reset` | 清空可再生工作区为下期腾位（`reset yes` 确认；保留 assets/ 与代码） |
+| `all` | 端到端（已幂等，可安全重跑） |
+
+日常迭代回路：**改 `build_v2.py` → `build`（0 WARN）→ `preview`（肉眼）→ 满意 `render`**。
+
+---
+
+## 6. 开下一期视频的清单
+
+1. `python build_v2.py reset yes` 清空上一期工作区（保留代码）。
+2. 把新素材丢进 `assets/`（尺寸自动探测，不用填 `DIMS`；要 EXIF 校正可在 `v2lib.DIMS` 覆盖）。
+3. 改 `build_v2.py`：重写 `SCENES`（旁白 + 用 `L.*` 组件拼前景，多用高级 FX）、`CHAPTER_GROUPS`、
+   `COVERS` 封面、片名常量；按需更新 `config.WHISPER_INITIAL_PROMPT` 热词。
+4. `doctor` → `all`（首跑会合成配音+转写）。听配音/看 `preview` 满意后再让它跑到 `render`。
+5. 出片：`verify` → `ship`。`chapters` 复制到 B 站。
+6. 收尾：更新 `video-scaffold-backup.zip`（`git archive HEAD`）并 push GitHub。
