@@ -126,8 +126,13 @@ WHISPER_INITIAL_PROMPT = "游戏王MD, 官方绿卡, 网易BUFF, 倒余额, 初�
 
 # --- chapters (Bilibili) ----------------------------------------------------
 # Bilibili reads "MM:SS Title" / "HH:MM:SS Title" lines; first MUST be 00:00.
-# Keep titles short; ~3-10 chapters is ideal (warn past this).
-CHAPTER_MAX = 12
+# Two principles (the chapter writer warns when you break them):
+#   1. AS FEW as possible  - a TOC, not an index. Aim 6-9, hard-warn past CHAPTER_MAX.
+#   2. AS SHORT as possible - 4-6 CJK chars; AI summarises the narration into a
+#      glanceable phrase, not a sentence. Warn past CHAPTER_TITLE_MAXLEN.
+CHAPTER_MAX = 10
+CHAPTER_TITLE_MAXLEN = 6   # CJK=1, latin/digit≈0.6; warn above (ideal 4-5)
+CHAPTER_MIN_GAP = 5        # adjacent chapters closer than this (s) -> warn (Bilibili)
 
 # --- directories ------------------------------------------------------------
 DIR_ASSETS = _p("assets")

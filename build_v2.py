@@ -9,23 +9,25 @@
      写旁白 + 用 L.* 组件拼前景，cue="旁白真词" 做词级踩点，多用高级 FX；4) 改 CHAPTER_GROUPS/COVERS。
 动效/组件/CLI/纠偏 全部只读 docs/AI_GUIDE.md（+ docs/ADVANCED_FX.md），不要通读源码。
 
-用法： python build_v2.py [doctor|scripts|tts|timing|build|lint|preview|cover|chapters|render|merge|verify|cleanup|ship|reset|all]
+用法： python build_v2.py [doctor|scripts|tts|timing|build|lint|preview|cover|chapters|publish|render|merge|verify|cleanup|ship|reset|all]
   doctor   渲染前体检：ffmpeg/ffprobe/背景/Fish key/playwright/assets 是否就绪
   build    片段嵌底板 -> scene_html/（改了文案/分镜先跑这个）
   lint     越界自检：自动找出离开画布的文字(HARD,必修)/离开毛玻璃的元素(soft,看情况)
   preview  生成 output/preview.html，浏览器里逐场景「动态」自检（渲染前必看）
   render   逐帧抓取叠背景 -> video_track.mp4，并自动接 merge 出带声音的成片
-  cover    渲染封面（骨架里 COVERS 为空，做好封面模板后再填）
-  chapters 生成 output/chapters.txt 与 章节管理.txt（B站章节）
+  cover    渲染封面（cover_base.html 占位符支持文字/图片；填 COVERS）
+  chapters 生成 output/chapters.txt 与 章节管理.txt（B站章节，少而短，自动校验）
+  publish  生成 output/publish.txt（投稿模版：标题/简介/标签/章节/自检清单）
   verify   核对成片/封面已生成且非空（就绪自检）
   cleanup  清理临时分片/中间产物，回收 NVMe
   ship     verify 通过则 cleanup，一键收尾
   reset    清空可再生工作区（scripts/raw_audio/srt/scene_html/output/durations）为下期腾位
+  archive  发布后归档：把本期 per-project 文件移到 ..\video-archive\<名字>\ 并留空工作区（一键收尾）
   all      端到端（tts/timing 已幂等：配音/转写齐全会自动跳过，不再覆盖审过的配音）
 注意：tts/timing 现已幂等——raw_audio/ 配音齐全时 `all` 会自动跳过合成与转写
 （要强制重配音：`python build_v2.py tts force`）。日常迭代用 `build`→`lint`→`preview`→（满意再）`render`。
 """
-import os, sys, glob, json, pathlib, math
+import os, sys, glob, json, pathlib, math, re
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config, v2lib as L
 from pipeline import fish_tts, durations as dur_mod, transcribe, build_scene, render, merge
@@ -35,6 +37,12 @@ INK, ACCENT, RED, GOLD = L.INK, L.ACCENT, L.RED, L.GOLD
 M, CX, CY, COL = L.M, L.CX, L.CY, L.COL
 
 TITLE = "游戏王 MD · 待定标题"     # 章节管理.txt 抬头 + 封面用，改成本期标题
+
+# ---- B站投稿元数据（AI 读完旁白后精炼填写；`publish` 阶段汇成 output/publish.txt）----
+# 标题含关键词+钩子；简介一句话讲清价值（章节会自动追加）；标签 6-10 个。
+VIDEO_TITLE = "待定标题（≤80字，关键词在前 + 一个钩子）"
+VIDEO_DESC = "一句话简介：这期讲什么、对观众有什么用。\n（下方章节由 publish 自动追加。）"
+TAGS = ["游戏王", "MasterDuel", "氪金教程", "电子雪貂饲养员"]
 
 
 # ============================================================================
@@ -54,7 +62,7 @@ def s00_open():
         + L.ambient_motes(n=18)                       # 氛围浮尘（高级感、不抢戏）
         + L.text("电子雪貂饲养员 · 亲测", M, 1860, lvl=4, delay=2.0, opacity=1, fill=ACCENT)
     )
-S00 = "[excited]开场钩子的旁白放这里。TODO：换成本期真实开场白，记得 cue 用旁白真词。"
+S00 = "[excited]开场钩子放这里，把核心卖点一句话摆明白。TODO：换成本期真实开场白（cue 用旁白真词）。"
 
 
 def s01_dashboard():
@@ -66,7 +74,7 @@ def s01_dashboard():
         + L.gauge(82, zones=[(0.4, ACCENT), (0.7, GOLD), (1.0, RED)], x=2900, y=1200, r=360,
                   title="代充封号风险", unit="%", cue="风险")
     )
-S01 = "这一段演示全息数据看板和风险仪表盘。TODO：换成本期真实数据与口径。"
+S01 = "这一段用全息看板摆出核心数据，再用仪表盘看风险高低。TODO：换成本期真实数据与口径。"
 
 
 def s02_money():
@@ -77,7 +85,7 @@ def s02_money():
         + L.discount_seal("74.8折", x=2950, y=820, cue="折")
         + L.num_burst(74.8, 2950, 1480, lvl=0, suffix="%", dec=1, cue="七四八")
     )
-S02 = "这一段演示币种换算、折扣印章和数字粒子炸裂。TODO：换成本期真实金额。"
+S02 = "这一段算账：先做币种换算，再盖个折扣章，最后数字跳到七四八。TODO：换成本期真实金额。"
 
 
 def s03_cta():
@@ -86,7 +94,7 @@ def s03_cta():
         L.coin_fountain(x=CX, y=1500, cue="收益")
         + L.end_card("一键三连 + 关注", "下期见", cue="三连", delay=0.3)
     )
-S03 = "结尾：觉得有用就一键三连加关注，我们下期见。"
+S03 = "结尾：有收益就回来，觉得有用就一键三连加关注，下期见。"
 
 
 # (name, build_fn, narration) —— 顺序即成片顺序，名字用于 preview/章节对照
@@ -97,17 +105,27 @@ SCENES = [
     ("s03", s03_cta,       S03),
 ]
 
-# ---- 章节(B站): (0-based 起始场景下标, 章节标题) —— 一个清晰主题一章，短到手机能看 ----
+# ---- 章节(B站): (0-based 起始场景下标, 章节标题) ----------------------------------
+# 两条铁律（chapters 阶段会自动 WARN 违反者）：① 尽可能【少】(TOC 不是目录,6-9 章)；
+# ② 尽可能【短】(4-6 字,AI 读旁白精炼成一眼能扫的词,不是句子)。时间由 durations 自动算,
+# 永远对得上。下面 场景对照 表里有"时间↔旁白摘要",照着把相邻场景归并成短标题即可。
 CHAPTER_GROUPS = [
-    (0, "开场钩子"),
-    (1, "核心数据"),
-    (3, "结尾三连"),
+    (0, "钩子"),
+    (1, "数据"),
+    (3, "三连"),
 ]
 
-# ---- 封面：骨架留空。做好本期封面模板(templates/)后按下面格式填：
-#   ("模板.html", "cover.png", {占位符: 文件路径}, (宽,高), 缩放)
-#   注意 render_covers 把 repl 的值都当**文件路径**转成 file URI（只能填图片，不能填文字）。
-COVERS = []
+# ---- 封面：repl 的值=图片路径则转 file URI，否则当**文字**直接替换（render_covers 已支持）。
+#   占位符见 templates/cover_base.html：@@KICKER@@ @@TITLE@@ @@SUBTITLE@@ @@HERO@@。
+#   骨架先用通用底板 + 占位原画跑通；做本期封面时改文字、把 @@HERO@@ 指到 assets/ 的图。
+COVERS = [
+    ("cover_base.html", "cover.png", {
+        "@@KICKER@@": "游戏王 MASTER DUEL",
+        "@@TITLE@@": "待定标题",
+        "@@SUBTITLE@@": "待定副标题",
+        "@@HERO@@": os.path.join(config.ROOT, "examples", "sample_hero.png"),
+    }, (3840, 2160), 1),
+]
 
 
 def render_covers():
@@ -127,8 +145,10 @@ def render_covers():
             except Exception: b = await p.chromium.launch(headless=True)
             for tpl, outname, repl, (vw, vh), scale in COVERS:
                 html = pathlib.Path(os.path.join(config.ROOT, "templates", tpl)).read_text(encoding="utf-8")
-                for ph, path in repl.items():
-                    html = html.replace(ph, pathlib.Path(path).as_uri())
+                for ph, val in repl.items():
+                    # an existing file -> embed as file URI (images); else literal text
+                    rep = pathlib.Path(val).as_uri() if os.path.exists(str(val)) else str(val)
+                    html = html.replace(ph, rep)
                 tmp = os.path.join(config.DIR_SCENE, f"_cover_{outname}.html")
                 pathlib.Path(tmp).write_text(html, encoding="utf-8")
                 ctx = await b.new_context(viewport={"width": vw, "height": vh}, device_scale_factor=scale)
@@ -141,41 +161,115 @@ def render_covers():
     asyncio.run(run())
 
 
+def _validate_chapter_groups():
+    """Fail/warn early if CHAPTER_GROUPS is out of sync with SCENES (the usual
+    breakage when scenes are added/removed but the indices aren't updated)."""
+    bad = [i for i, _ in CHAPTER_GROUPS if not (0 <= i < len(SCENES))]
+    if bad:
+        sys.exit(f"[chapters] CHAPTER_GROUPS has out-of-range scene index {bad} "
+                 f"(only {len(SCENES)} scenes). Fix the indices in build_v2.py.")
+    idxs = [i for i, _ in CHAPTER_GROUPS]
+    if idxs != sorted(idxs):
+        print("[chapters] WARN CHAPTER_GROUPS not in ascending scene order.")
+    if not idxs or idxs[0] != 0:
+        print("[chapters] WARN first chapter should start at scene 0 (so it lands at 00:00).")
+
+
+def _narr_snippet(narr, n=24):
+    """Strip Fish tags / newlines and clip - a time↔narration map to author chapters."""
+    return re.sub(r"\[[^\]]*\]", "", narr).strip().replace("\n", " ")[:n]
+
+
 def write_chapters():
     """Bilibili chapter markers: output/chapters.txt (paste-ready) + a richer
-    章节管理.txt (markers + per-scene reference for manual tweaking)."""
+    章节管理.txt (markers + per-scene 时间↔旁白摘要 so the AI can re-summarise)."""
+    _validate_chapter_groups()
     durs = _durs()
     chs = chapters_mod.from_scene_groups(durs, CHAPTER_GROUPS)
-    chapters_mod.write(chs)  # -> output/chapters.txt
+    chapters_mod.write(chs)  # -> output/chapters.txt (also audits few/short/spacing)
     offs, acc = [], 0.0
     for d in durs:
         offs.append(acc); acc += d
     lines = [f"{TITLE} · 章节管理",
              f"全片 {chapters_mod.fmt_ts(acc)} · {len(SCENES)} 场景 · {len(CHAPTER_GROUPS)} 章节",
              "用法：复制下面【章节标记】整块，粘进 B 站投稿页「章节文本编辑器」一键生成。",
-             "格式 MM:SS 标题；首行须 00:00；相邻章节间隔 ≥5 秒。", "",
+             "原则：章节尽量【少】、标题尽量【短】(4-6字)；时间自动算、永远对得上。", "",
              "──────── 章节标记（复制这块）────────"]
     lines += [f"{chapters_mod.fmt_ts(t)} {title}" for t, title in chs]
-    lines += ["", "──────── 场景对照（自己定位用，不用粘）────────"]
-    for i, (name, _, _) in enumerate(SCENES):
-        lines.append(f"#{i+1:02d}  {chapters_mod.fmt_ts(offs[i])}  {name:5s}  {durs[i]:5.1f}s")
+    lines += ["", "──────── 场景对照 + 旁白摘要（给 AI 重拟章节用，不用粘）────────"]
+    for i, (name, _, narr) in enumerate(SCENES):
+        lines.append(f"#{i+1:02d}  {chapters_mod.fmt_ts(offs[i])}  {name:5s}  {durs[i]:5.1f}s  {_narr_snippet(narr)}")
     out = os.path.join(config.ROOT, "章节管理.txt")
     with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     print(f"[chapters] -> {out}")
 
 
+def write_publish():
+    """投稿准备模版 -> output/publish.txt：标题 + 简介(自动追加章节) + 标签 + 封面 + 自检清单。
+    每期投稿前跑一次（AI 先把 VIDEO_TITLE/VIDEO_DESC/TAGS 按旁白精炼好）。"""
+    _validate_chapter_groups()
+    durs = _durs()
+    chs = chapters_mod.from_scene_groups(durs, CHAPTER_GROUPS)
+    if chs and chs[0][0] > 0.001:
+        chs = [(0.0, chs[0][1])] + chs[1:]
+    chapters_mod.audit(chs)
+    ch_block = "\n".join(f"{chapters_mod.fmt_ts(t)} {title}" for t, title in chs)
+    cover = os.path.join(config.DIR_OUTPUT, "cover.png")
+    lines = ["【标题】", VIDEO_TITLE, "",
+             "【简介 / 视频描述】", VIDEO_DESC.strip(), "", ch_block, "",
+             "【标签】", "  ".join(f"#{t}" for t in TAGS), "",
+             "【封面】", cover if os.path.exists(cover) else "(未生成：跑 `python build_v2.py cover`)", "",
+             "【投稿自检】",
+             f"- 时长 {chapters_mod.fmt_ts(sum(durs))} · {len(SCENES)} 场景 · {len(chs)} 章节",
+             "- [ ] 标题含关键词+钩子；合规措辞（淘宝→某宝 / 闲鱼→某鱼）",
+             "- [ ] 章节少而短、时间对得上",
+             "- [ ] 封面已做、文字无越界",
+             "- [ ] final_output.mp4 已 verify"]
+    config.ensure_dirs()
+    out = os.path.join(config.DIR_OUTPUT, "publish.txt")
+    with open(out, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"[publish] -> {out}")
+
+
 # ====================================================================== driver
+def _spoken(text):
+    """Narration with Fish tags ([excited]/[pause]/…) stripped - what's actually said."""
+    return re.sub(r"\[[^\]]*\]", "", text)
+
+
 def write_scripts():
     config.ensure_dirs()
     for i, (_, _, text) in enumerate(SCENES, 1):
         with open(os.path.join(config.DIR_SCRIPTS, f"script_{i:02d}.txt"), "w", encoding="utf-8") as f:
             f.write(text)
-    print(f"[v2] wrote {len(SCENES)} scripts")
+    chars = sum(len(_spoken(t)) for _, _, t in SCENES)
+    print(f"[v2] wrote {len(SCENES)} scripts (~{chars} 字, est ~{chars/4.2/60:.1f} min @央视语速; "
+          f"实际时长以 tts 后的 durations 为准)")
+
+
+def check_cues():
+    """INFO: cue= words not literally in their scene's narration. In a fresh pass
+    every cue should be a spoken word, so a miss is usually a typo or an
+    on-screen-only word - catch it now, before the ~10min TTS+Whisper. (Legit
+    ASR-aligned cues from the two-step fix can also show; verify those.)"""
+    misses = []
+    for name, fn, narr in SCENES:
+        spoken = re.sub(r"\s", "", _spoken(narr))
+        for cue in sorted(set(re.findall(r'data-cue="([^"]*)"', fn()))):
+            if cue and re.sub(r"\s", "", cue) not in spoken:
+                misses.append((name, cue))
+    if misses:
+        print(f"[cue-check] {len(misses)} cue(s) not in narration (typo / on-screen-only / ASR-aligned?):")
+        for name, cue in misses[:24]:
+            print(f"  {name}: cue={cue!r}")
+    return misses
 
 
 def build_all():
     config.ensure_dirs()
+    check_cues()
     paths = []
     for i, (name, fn, _) in enumerate(SCENES, 1):
         srt = os.path.join(config.DIR_SRT, f"srt_{i:02d}.json")
@@ -246,8 +340,36 @@ def reset_workspace(confirm):
           "then `python build_v2.py doctor` -> `all`.")
 
 
+def archive_project(name):
+    """End-of-video one-command archive: snapshot build_v2.py + MOVE the per-project
+    workspace/deliverables to  <parent>\\video-archive\\<name>\\  so E:\\video stays
+    scaffold-only (AI never re-reads heavy content). Leaves empty workspace dirs
+    behind = ready for the next video. (BGM is kept in place - it's often reused.)"""
+    if not name:
+        sys.exit("[archive] usage: python build_v2.py archive <name>   (e.g. archive md-krijin-v2)")
+    import shutil as _sh
+    dest = os.path.join(os.path.dirname(config.ROOT), "video-archive", name)
+    if os.path.isdir(dest) and os.listdir(dest):
+        sys.exit(f"[archive] refuse: {dest} exists and is not empty")
+    os.makedirs(dest, exist_ok=True)
+    _sh.copy2(os.path.join(config.ROOT, "build_v2.py"), os.path.join(dest, "build_v2.py"))
+    moved = []
+    for d in ("assets", "scripts", "raw_audio", "srt_data", "scene_html", "rendered", "output"):
+        src = os.path.join(config.ROOT, d)
+        if os.path.isdir(src) and os.listdir(src):
+            _sh.move(src, os.path.join(dest, d)); moved.append(d + "/")
+    for f in (config.DURATIONS_JSON, os.path.join(config.ROOT, "章节管理.txt")):
+        if os.path.exists(f):
+            _sh.move(f, os.path.join(dest, os.path.basename(f))); moved.append(os.path.basename(f))
+    config.ensure_dirs()                 # recreate empty workspace = clean slate
+    print(f"[archive] -> {dest}")
+    print(f"[archive] moved: {', '.join(moved) or '(nothing to move)'}  (+ build_v2.py snapshot)")
+    print("[archive] E:\\video is clean. Next video: edit TITLE/SCENES, drop assets/, `doctor` -> `all`.")
+
+
 VALID = {"doctor", "scripts", "tts", "timing", "build", "lint", "preview", "cover",
-         "chapters", "render", "merge", "verify", "cleanup", "ship", "reset", "all"}
+         "chapters", "publish", "render", "merge", "verify", "cleanup", "ship",
+         "reset", "archive", "all"}
 
 
 def main():
@@ -263,6 +385,8 @@ def main():
         sys.exit(0 if doctor() else 1)
     if stage == "reset":
         return reset_workspace(rest[0] if rest else "")
+    if stage == "archive":
+        return archive_project(rest[0] if rest else "")
 
     if stage in ("scripts", "all"):
         write_scripts()
@@ -305,6 +429,8 @@ def main():
         print("[v2] DONE -> output/final_output.mp4 (with narration + BGM)")
     if stage in ("verify", "all"):
         cleanup_mod.verify()
+    if stage in ("publish", "all"):     # B站投稿准备模版（标题/简介/标签/章节/自检）
+        write_publish()
     if stage == "cleanup":
         cleanup_mod.cleanup()
     if stage == "ship":

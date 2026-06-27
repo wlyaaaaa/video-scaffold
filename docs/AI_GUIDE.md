@@ -97,8 +97,9 @@ rule(分割线) / chip(药丸) / strike(删除线) / sweep(荧光扫) / arrow / 
 | `build` | 片段嵌底板 → `scene_html/`（**改了文案/分镜先跑这个，盯 0 WARN**） |
 | `lint` | **越界自检**：自动找离开画布的文字(HARD,必修)/离开毛玻璃的元素(soft,看情况)。渲染前先跑，省得 90min 后才发现文字被切 |
 | `preview` | 生成 `output/preview.html`，浏览器逐场景**动态**自检（渲染前必看） |
-| `cover` | 渲染 `output/cover.png`(16:9) 与 `cover_4x3.png` |
-| `chapters` | 生成 `output/chapters.txt` 与 `章节管理.txt`（B 站章节，直接粘贴） |
+| `cover` | 渲染封面（`COVERS`；`cover_base.html` 占位符 `@@TITLE@@`/`@@SUBTITLE@@`/`@@KICKER@@`/`@@HERO@@`，值是图片路径→嵌图，否则当文字） |
+| `chapters` | 生成 `output/chapters.txt`（直接粘）+ `章节管理.txt`（含时间↔旁白摘要）。**自动校验少/短/间距**，违反就 WARN |
+| `publish` | 生成 `output/publish.txt`（投稿模版：标题/简介+章节/标签/自检清单）。AI 先填 `VIDEO_TITLE`/`VIDEO_DESC`/`TAGS` |
 | `render` | 逐帧抓取叠背景 → `video_track.mp4`，**自动接 merge** 出带声音成片（4 worker + 帧校验，约 80–90min） |
 | `merge` | 配音拼接 + BGM 侧链闪避 → `output/final_output.mp4` |
 | `verify` | 核对成片/封面已生成且非空 |
@@ -123,6 +124,8 @@ rule(分割线) / chip(药丸) / strike(删除线) / sweep(荧光扫) / arrow / 
    按需更新 `config.WHISPER_INITIAL_PROMPT` 热词。
 3. `doctor` → `build` → `lint`（0 HARD）→ `preview`（肉眼）。满意再继续。
 4. `all`（首跑合成配音+转写；幂等，可重跑）。或分步 `tts`→`timing`→`render`。
-5. 出片：`verify` → `ship`。`chapters` 复制到 B 站。
-6. 收尾：把这一期的 per-project 文件归档出 `E:\video`（仿照 v1：移到 `E:\video-archive\<本期>\`，
+5. 章节：**读每段旁白精炼**成 `CHAPTER_GROUPS`——**尽量少（6-9 章）、尽量短（4-6 字，是词不是句）**，
+   时间由 durations 自动对齐。`章节管理.txt` 里有"时间↔旁白摘要"帮你拟；`chapters` 会自动 WARN 太长/太密/太多。
+6. 出片：`verify` → `publish`（填好 `VIDEO_TITLE`/`VIDEO_DESC`/`TAGS` 后生成投稿模版）→ `ship`。把 `chapters`/`publish` 复制到 B 站。
+7. 收尾：把这一期的 per-project 文件归档出 `E:\video`（仿照 v1：移到 `E:\video-archive\<本期>\`，
    再 `reset yes`），更新 `video-scaffold-backup.zip`（`git archive HEAD`）并 push GitHub。
