@@ -25,7 +25,7 @@
 | 文件 | 职责 |
 |---|---|
 | `config.py` | 全局静态配置（分辨率/FPS/线程/Whisper 热词/Fish 模型/BGM 音量）。 |
-| `build_v2.py` | **主业务**：场景数据 `SCENES`、章节 `CHAPTER_GROUPS`、每个 `sNN_*()` 场景的组件拼接、CLI 驱动。**改内容/排版在这里。** |
+| `build_v2.py` | **主业务**：场景数据 `SCENES`、章节 `CHAPTER_GROUPS`、每个 `sNN_*()` 场景的组件拼接、CLI 驱动。**改内容/排版在这里。** 现为干净 MD 骨架（4 个示例场景，照着改）。 |
 | `v2lib.py` (`as L`) | **组件库**：画布常量 + 全部排版/动效组件（含 8 个高级 FX）。 |
 | `templates/scene_base.html` | 动画底板 + 确定性运行时（`measure()`/`apply()`/`seekTime`）。所有 `data-anim` 原语在此。 |
 | `pipeline/` | 各阶段实现（tts/durations/transcribe/build_scene/render/merge/preview/chapters/cleanup）。**通常不用读。** |
@@ -111,12 +111,18 @@ rule(分割线) / chip(药丸) / strike(删除线) / sweep(荧光扫) / arrow / 
 
 ---
 
-## 6. 开下一期视频的清单
+## 6. 开下一期视频的清单（当前已是干净起步状态）
 
-1. `python build_v2.py reset yes` 清空上一期工作区（保留代码）。
-2. 把新素材丢进 `assets/`（尺寸自动探测，不用填 `DIMS`；要 EXIF 校正可在 `v2lib.DIMS` 覆盖）。
-3. 改 `build_v2.py`：重写 `SCENES`（旁白 + 用 `L.*` 组件拼前景，多用高级 FX）、`CHAPTER_GROUPS`、
-   `COVERS` 封面、片名常量；按需更新 `config.WHISPER_INITIAL_PROMPT` 热词。
-4. `doctor` → `all`（首跑会合成配音+转写）。听配音/看 `preview` 满意后再让它跑到 `render`。
+> 第一期已发布并归档到 **`E:\video-archive\md-krijin-v1\`**（完整 build_v2_v1.py、文案/数据 md、
+> 实拍图、配音、成片都在那；要抄分镜/数据口径去那翻，**别拉进当前会话浪费 token**）。
+> `build_v2.py` 现在是**干净的 MD 骨架**（4 个不依赖素材的示例场景），workspace 已清空。
+
+1. 改 `build_v2.py` 顶部 `TITLE`，把新素材丢进 `assets/`（尺寸自动探测，不用填 `DIMS`；要 EXIF 校正可在 `v2lib.DIMS` 覆盖）。
+2. 重写 `SCENES`：每个场景写旁白 + 用 `L.*` 组件拼前景（多用高级 FX：`holo_panel`/`gauge`/`convert`/
+   `num_burst`/`morph_path`…），`cue="旁白真词"` 踩点；同步改 `CHAPTER_GROUPS`、`COVERS`（封面模板）。
+   按需更新 `config.WHISPER_INITIAL_PROMPT` 热词。
+3. `doctor` → `build` → `lint`（0 HARD）→ `preview`（肉眼）。满意再继续。
+4. `all`（首跑合成配音+转写；幂等，可重跑）。或分步 `tts`→`timing`→`render`。
 5. 出片：`verify` → `ship`。`chapters` 复制到 B 站。
-6. 收尾：更新 `video-scaffold-backup.zip`（`git archive HEAD`）并 push GitHub。
+6. 收尾：把这一期的 per-project 文件归档出 `E:\video`（仿照 v1：移到 `E:\video-archive\<本期>\`，
+   再 `reset yes`），更新 `video-scaffold-backup.zip`（`git archive HEAD`）并 push GitHub。
