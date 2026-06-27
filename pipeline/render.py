@@ -243,6 +243,12 @@ def _worker_entry(task_queue, counter, lock, t0, timeline, total_frames, bg_dur,
 
 def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_workers=None):
     config.ensure_dirs()
+    # Clean up old _chunk_*.mp4 and temp files from previous runs to start fresh
+    try:
+        from pipeline.cleanup import cleanup
+        cleanup()
+    except Exception:
+        pass
     if not os.path.exists(config.BG_VIDEO):
         raise FileNotFoundError(f"background not found: {config.BG_VIDEO}")
 
