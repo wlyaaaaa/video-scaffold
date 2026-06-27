@@ -124,8 +124,18 @@ async def _worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg
     from playwright.async_api import async_playwright
     async with async_playwright() as p:
         try:
-            browser = await p.chromium.launch(headless=True, channel="chrome",
-                                              args=["--force-gpu-rasterization", "--enable-zero-copy"])
+            browser = await p.chromium.launch(
+                headless=True, channel="chrome",
+                args=[
+                    "--force-gpu-rasterization",
+                    "--enable-zero-copy",
+                    "--disable-gpu-vsync",
+                    "--no-sandbox",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                    "--mute-audio"
+                ]
+            )
         except Exception:
             browser = await p.chromium.launch(headless=True)
         ctx = await browser.new_context(viewport={"width": config.WIDTH, "height": config.HEIGHT})
@@ -243,12 +253,6 @@ def _worker_entry(task_queue, counter, lock, t0, timeline, total_frames, bg_dur,
 
 def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_workers=None):
     config.ensure_dirs()
-    # Clean up old _chunk_*.mp4 and temp files from previous runs to start fresh
-    try:
-        from pipeline.cleanup import cleanup
-        cleanup()
-    except Exception:
-        pass
     if not os.path.exists(config.BG_VIDEO):
         raise FileNotFoundError(f"background not found: {config.BG_VIDEO}")
 
@@ -263,17 +267,71 @@ def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_worke
     chunk_frames = max(1, min(config.CHUNK_FRAMES, math.ceil(total_frames / num_workers)))
     total_chunks = (total_frames + chunk_frames - 1) // chunk_frames
 
+    def _expected(i):
+        start_idx = i * chunk_frames
+        return min(start_idx + chunk_frames, total_frames) - start_idx
+
+    def _bad(i):
+        path = os.path.join(config.DIR_OUTPUT, f"_chunk_{i:05d}.mp4")
+        if (not os.path.exists(path)) or os.path.getsize(path) == 0:
+            return True
+        return _chunk_nframes(path) != _expected(i)
+
+    # 1. Identify which chunks are bad and must be re-rendered (Smart Resuming)
+    bad_chunks = []
+    for i in range(total_chunks):
+        if _bad(i):
+            bad_chunks.append(i)
+            # Remove bad/partial chunk file so the retry/render rewrites cleanly
+            path = os.path.join(config.DIR_OUTPUT, f"_chunk_{i:05d}.mp4")
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+
+    # 2. Delete any orphaned chunk files from a previous run with a larger total_chunks
+    import glob
+    existing_chunks = glob.glob(os.path.join(config.DIR_OUTPUT, "_chunk_*.mp4"))
+    for f in existing_chunks:
+        try:
+            bn = os.path.basename(f)
+            idx = int(bn.split("_")[2].split(".")[0])
+            if idx >= total_chunks:
+                os.remove(f)
+        except Exception:
+            pass
+
+    # 3. Clean up generic concatenation helper lists
+    for f in [os.path.join(config.DIR_OUTPUT, "_concat.txt"), os.path.join(config.DIR_OUTPUT, "_audio_list.txt")]:
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+        except OSError:
+            pass
+
+    # 4. Calculate completed frames in already rendered valid chunks
+    completed_frames = sum(_expected(i) for i in range(total_chunks) if i not in bad_chunks)
+
+    # Output resuming status
+    if completed_frames > 0:
+        print(f"[render] Smart Resuming: found {total_chunks - len(bad_chunks)}/{total_chunks} valid chunks already rendered.")
+        print(f"[render] Re-rendering {len(bad_chunks)} missing/bad chunks. Completed frames: {completed_frames}/{total_frames} ({100.0 * completed_frames / total_frames:.1f}%)")
+    else:
+        print(f"[render] Starting fresh render of all {total_chunks} chunks.")
+
     print(f"[render] {len(timeline)} scenes, {total_seconds:.2f}s, "
           f"{total_frames} frames, {total_chunks} chunks x {chunk_frames}f, {num_workers} workers")
 
     t0 = time.time()
-    counter, lock = Value("i", 0), Lock()
+    counter, lock = Value("i", completed_frames), Lock()
     task_queue = Queue()
-    for i in range(total_chunks):
+    for i in bad_chunks:
         task_queue.put(i)
 
     procs = []
-    for _ in range(min(num_workers, total_chunks)):
+    # Only spawn workers if there are chunks to render
+    for _ in range(min(num_workers, len(bad_chunks))):
         p = Process(target=_worker_entry,
                     args=(task_queue, counter, lock, t0, timeline, total_frames, bg_dur, chunk_frames))
         p.start()
@@ -281,17 +339,7 @@ def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_worke
     for p in procs:
         p.join()
 
-    # lossless concat of chunks (robust: never silently truncate OR drift). Each
-    # chunk must exist, be non-empty, AND hold exactly its expected frame count -
-    # the last check is what guarantees the muxed audio stays in sync end to end.
-    def _expected(i):
-        start_idx = i * chunk_frames
-        return min(start_idx + chunk_frames, total_frames) - start_idx
-    def _bad(i):
-        path = os.path.join(config.DIR_OUTPUT, f"_chunk_{i:05d}.mp4")
-        if (not os.path.exists(path)) or os.path.getsize(path) == 0:
-            return True
-        return _chunk_nframes(path) != _expected(i)
+    # lossless concat of chunks (robust: never silently truncate OR drift)
     missing = [i for i in range(total_chunks) if _bad(i)]
     if missing:
         raise RuntimeError(
@@ -307,8 +355,7 @@ def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_worke
                     "-f", "concat", "-safe", "0", "-i", concat_list,
                     "-c", "copy", out_path], check=True)
 
-    # final guarantee: the stitched track must hold every frame the timeline asked
-    # for, so it lines up with the narration to the frame when muxed.
+    # final guarantee: the stitched track must hold every frame the timeline asked for
     got = _chunk_nframes(out_path)
     if got != total_frames:
         raise RuntimeError(
