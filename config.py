@@ -47,7 +47,7 @@ CQ = "22"                 # constant quality; lower = better/bigger (18-24 sane)
 NVENC_EXTRA = ["-preset", "p6", "-tune", "hq", "-rc", "constqp",
                "-spatial-aq", "1", "-temporal-aq", "1", "-rc-lookahead", "32",
                "-pix_fmt", "yuv420p10le"]
-NUM_WORKERS = 5           # 5 keeps every av1_nvenc session within the GPU's
+NUM_WORKERS = 4           # 4 keeps every av1_nvenc session within the GPU's
                           # encode-session cap; 8 contended and silently dropped
                           # frames (the 3:47 desync). render.py now also verifies
                           # each chunk's frame count, so a drop fails loud, not silent.
