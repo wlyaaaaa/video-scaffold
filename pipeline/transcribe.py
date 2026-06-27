@@ -73,10 +73,12 @@ def transcribe_one(audio_path, out_path):
     if pipe is not None:
         segments, _ = pipe.transcribe(audio_path, language=config.WHISPER_LANGUAGE,
                                       word_timestamps=True, vad_filter=True,
-                                      batch_size=config.WHISPER_BATCH_SIZE)
+                                      batch_size=config.WHISPER_BATCH_SIZE,
+                                      initial_prompt=config.WHISPER_INITIAL_PROMPT)
     else:
         segments, _ = model.transcribe(audio_path, language=config.WHISPER_LANGUAGE,
-                                       word_timestamps=True, vad_filter=True)
+                                       word_timestamps=True, vad_filter=True,
+                                       initial_prompt=config.WHISPER_INITIAL_PROMPT)
     words = []
     for seg in segments:
         for w in (seg.words or []):

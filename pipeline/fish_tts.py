@@ -15,10 +15,25 @@ API contract (see config.py):
 import os
 import sys
 import glob
+import subprocess
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+
+
+def _pad_tail(path, seconds=None):
+    """Append a short silence so the splice into the next scene breathes instead of
+    rushing ("两句话的拼接偏快"). Re-encodes to a uniform mp3 profile (every clip
+    identical) so merge can still stream-copy concat. No-op if disabled."""
+    sec = config.SCENE_TAIL_SILENCE if seconds is None else seconds
+    if not sec or sec <= 0:
+        return
+    tmp = path + ".pad.mp3"
+    subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", path, "-af", f"apad=pad_dur={sec}",
+                    "-c:a", "libmp3lame", "-q:a", "2", tmp], check=True)
+    os.replace(tmp, path)
 
 
 def synth_one(text, out_path, reference_id=config.FISH_REFERENCE_ID, model=config.FISH_MODEL):
@@ -43,6 +58,7 @@ def synth_one(text, out_path, reference_id=config.FISH_REFERENCE_ID, model=confi
         return False
     with open(out_path, "wb") as f:
         f.write(resp.content)
+    _pad_tail(out_path)   # add the inter-scene breath; durations.build picks it up
     return True
 
 

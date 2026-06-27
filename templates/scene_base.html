@@ -84,6 +84,10 @@
 (function () {
   const easeOut = p => 1 - Math.pow(1 - p, 3);
   const clamp01 = v => Math.max(0, Math.min(1, v));
+  const easeInOut = p => p < 0.5 ? 4*p*p*p : 1 - Math.pow(-2*p + 2, 3) / 2;
+  const lerp = (a, b, p) => a + (b - a) * p;
+  // clean overshoot: rises to 1.12 then settles exactly to 1.0 (no jitter)
+  const popScale = p => p < 0.7 ? lerp(0.6, 1.12, p/0.7) : lerp(1.12, 1.0, (p-0.7)/0.3);
 
   // measured once on load so seekTime stays cheap & deterministic
   const nodes = [];
@@ -133,7 +137,40 @@
       }
     }
 
-    if (kind !== "draw" && kind !== "type") el.style.opacity = 0;
+    if (kind === "count") rec.comma = el.getAttribute("data-comma") === "1";
+
+    if (kind === "grow-bar") {
+      rec.dir = el.getAttribute("data-grow") || "x";
+      el.style.transformOrigin = rec.dir === "y" ? "center bottom" : "left center";
+    }
+    if (kind === "trace-dot") {           // stroke grows AND a dot rides the tip
+      let len = 0; try { len = el.getTotalLength(); } catch (e) { len = 0; }
+      el.style.strokeDasharray = len; el.style.strokeDashoffset = len; rec.len = len;
+      rec.dot = document.querySelector(el.getAttribute("data-dot") || "\\0");
+    }
+    if (kind === "move-along") {          // token rides an invisible path
+      rec.path = document.querySelector(el.getAttribute("data-path") || "\\0");
+      rec.len = rec.path ? rec.path.getTotalLength() : 0;
+      rec.x0 = parseFloat(el.getAttribute("data-x0") || "0");
+      rec.y0 = parseFloat(el.getAttribute("data-y0") || "0");
+    }
+    if (kind === "push") {                // ken-burns: lerp scale+translate (camera)
+      rec.sc0 = parseFloat(el.getAttribute("data-sc0") || "1");
+      rec.tx0 = parseFloat(el.getAttribute("data-tx0") || "0");
+      rec.ty0 = parseFloat(el.getAttribute("data-ty0") || "0");
+      rec.sc1 = parseFloat(el.getAttribute("data-sc1") || "1");
+      rec.tx1 = parseFloat(el.getAttribute("data-tx1") || "0");
+      rec.ty1 = parseFloat(el.getAttribute("data-ty1") || "0");
+      el.style.transformOrigin = el.getAttribute("data-origin") || "1920px 1080px";
+    }
+    if (kind === "play-head") rec.span = parseFloat(el.getAttribute("data-span") || "0");
+    if (kind === "tilt") { rec.to = parseFloat(el.getAttribute("data-to") || "0"); el.style.transformOrigin = "center center"; }
+    if (kind === "split-push") { rec.side = el.getAttribute("data-side") || "left"; rec.gap = parseFloat(el.getAttribute("data-gap") || "200"); }
+
+    // these manage their own opacity via apply(); only zero out the simple fades
+    const SELF = ["draw","type","trace-dot","grow-bar","draw-area","wipe",
+                  "highlight-sweep","move-along","play-head","tilt","push","fade-out","xfade"];
+    if (!SELF.includes(kind)) el.style.opacity = 0;
     nodes.push(rec);
   }
 
@@ -156,7 +193,10 @@
         break;
       case "count": {
         const v = rec.from + (rec.to - rec.from) * p;
-        el.textContent = rec.prefix + v.toFixed(rec.dec) + rec.suffix;
+        const s = rec.comma
+          ? v.toLocaleString('en-US', {minimumFractionDigits: rec.dec, maximumFractionDigits: rec.dec})
+          : v.toFixed(rec.dec);
+        el.textContent = rec.prefix + s + rec.suffix;
         el.style.opacity = clamp01((t - delay) / Math.min(dur, 0.4));
         break;
       }
@@ -174,6 +214,44 @@
         el.style.transform = `translateY(${y}px) rotate(${r}deg)`;
         break;
       }
+
+      // ---- 回形针 primitives (pure functions of t) -----------------------
+      case "fade-out": { const q = clamp01((t-delay)/dur); el.style.opacity = 1 - q; el.style.transform = `translateY(${q*-20}px)`; break; }
+      case "xfade":    { el.style.opacity = 1 - easeInOut(clamp01((t-delay)/dur)); break; }
+      case "grow-bar": { el.style.opacity = 1; el.style.transform = rec.dir === "y" ? `scaleY(${p})` : `scaleX(${p})`; break; }
+      case "draw-area":{ el.style.opacity = 1; el.style.transformOrigin = "center bottom"; el.style.transform = `scaleY(${p})`; break; }
+      case "pop":      { el.style.opacity = clamp01(p*3); el.style.transform = `scale(${popScale(p)})`; break; }
+      case "stamp":    { el.style.opacity = clamp01((p-0.3)*3); el.style.transform = `scale(${2.2 - 1.2*p})`; break; }
+      case "wipe": {
+        el.style.opacity = 1; const v = (1-p)*100; const d = el.getAttribute("data-dir") || "left";
+        el.style.clipPath = d==="right" ? `inset(0 0 0 ${v}%)` : d==="up" ? `inset(0 0 ${v}% 0)`
+                          : d==="down" ? `inset(${v}% 0 0 0)` : `inset(0 ${v}% 0 0)`;
+        break;
+      }
+      case "highlight-sweep": {
+        const mode = el.getAttribute("data-mode") || "stay";
+        if (mode === "pass") { el.style.opacity = 0.5; const x = -18 + p*118; el.style.clipPath = `inset(0 ${100-(x+18)}% 0 ${x}%)`; }
+        else { el.style.opacity = 0.22; el.style.clipPath = `inset(0 ${(1-p)*100}% 0 0)`; }
+        break;
+      }
+      case "trace-dot": {
+        el.style.strokeDashoffset = rec.len * (1-p);
+        if (rec.dot) { try { const pt = el.getPointAtLength(rec.len*p); rec.dot.style.transform = `translate(${pt.x}px,${pt.y}px)`; rec.dot.style.opacity = p < 0.999 ? 1 : 0; } catch(e){} }
+        break;
+      }
+      case "move-along": {
+        el.style.opacity = 1;
+        if (rec.path) { try { const pt = rec.path.getPointAtLength(rec.len*p); el.style.transform = `translate(${pt.x-rec.x0}px,${pt.y-rec.y0}px)`; } catch(e){} }
+        break;
+      }
+      case "play-head": { el.style.opacity = 1; el.style.transform = `translateX(${p*rec.span}px)`; break; }
+      case "tilt":      { el.style.opacity = 1; el.style.transform = `rotate(${rec.to*p}deg)`; break; }
+      case "split-push":{ const sgn = rec.side==="right"?1:-1; el.style.opacity = p; el.style.transform = `translateX(${sgn*(1-p)*rec.gap}px)`; break; }
+      case "push": {
+        const q = easeInOut(clamp01((t-delay)/dur)); el.style.opacity = 1;
+        el.style.transform = `translate(${lerp(rec.tx0,rec.tx1,q)}px,${lerp(rec.ty0,rec.ty1,q)}px) scale(${lerp(rec.sc0,rec.sc1,q)})`;
+        break;
+      }
     }
   }
 
@@ -185,6 +263,23 @@
   };
 
   window.seekTime(0);
+
+  // Optional self-driven preview loop. When the page is opened with ?dur=SECONDS
+  // it animates itself on a loop (used by output/preview.html so every scene can
+  // be eyeballed in-browser BEFORE rendering). The renderer never sets this param
+  // — it drives seekTime() frame-by-frame — so deterministic grabbing is untouched.
+  (function () {
+    const dur = parseFloat(new URLSearchParams(location.search).get("dur") || "0");
+    if (dur > 0) {
+      const tail = 0.9, t0 = performance.now();   // briefly hold the final frame
+      (function tick(now) {
+        let t = ((now - t0) / 1000) % (dur + tail);
+        if (t > dur) t = dur;
+        window.seekTime(t);
+        requestAnimationFrame(tick);
+      })(performance.now());
+    }
+  })();
 })();
 </script>
 </body>

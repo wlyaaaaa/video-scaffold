@@ -47,7 +47,10 @@ CQ = "22"                 # constant quality; lower = better/bigger (18-24 sane)
 NVENC_EXTRA = ["-preset", "p6", "-tune", "hq", "-rc", "constqp",
                "-spatial-aq", "1", "-temporal-aq", "1", "-rc-lookahead", "32",
                "-pix_fmt", "yuv420p10le"]
-NUM_WORKERS = 8           # 9950X3D physical cores for the render pool
+NUM_WORKERS = 6           # 6 keeps every av1_nvenc session within the GPU's
+                          # encode-session cap; 8 contended and silently dropped
+                          # frames (the 3:47 desync). render.py now also verifies
+                          # each chunk's frame count, so a drop fails loud, not silent.
 CHUNK_FRAMES = 300        # max frames per ffmpeg chunk (5 s @ 60fps); the
                           # renderer shrinks this so short videos still use all cores
 # Each worker keeps at most this many scene pages warm (LRU). Caps memory at
@@ -76,8 +79,8 @@ GRAIN = 4                 # temporal film grain strength; 0 disables.
 
 # --- background music (YOU supply the file) ---------------------------------
 # Drop any audio at BGM_PATH; merge ducks it under the narration automatically.
-BGM_PATH = _p("bgm.mp3")
-BGM_VOLUME = 0.22         # base music level before ducking
+BGM_PATH = _p("bgm.mp3")  # v2: two tracks (bgm/BGM1+BGM2) loudnorm-matched & concatenated; mux loops => 交替
+BGM_VOLUME = 0.34         # base music level before ducking (raised per request; sidechain still keeps it under VO)
 
 # --- Fish Audio TTS ---------------------------------------------------------
 # SECURITY: the key is read from env var FISH_API_KEY, or secret_local.py
@@ -93,8 +96,14 @@ FISH_ENDPOINT = "https://api.fish.audio/v1/tts"
 # 央视配音 (CCTV male voice). The free model `s2.1-pro-free` accepts this
 # reference_id with NO API credit required - verified working.
 FISH_MODEL = "s2.1-pro-free"
-FISH_REFERENCE_ID = "59cb5986671546eaa6ca8ae6f29f6d22"
+FISH_REFERENCE_ID = "3eee5ef4f6a94ce8adcaa8d4d86f7166"
 FISH_FORMAT = "mp3"
+# Breath between scenes: each synthesized clip gets this much trailing silence so
+# its last sentence doesn't slam straight into the next scene's first sentence
+# ("两句话的拼接偏快"). durations.json reads the padded length, so the video holds
+# its final frame for the same beat (under the cross-dissolve) and A/V stay synced.
+# This is a join/pacing fix only - it does NOT change the speaking rate. 0 disables.
+SCENE_TAIL_SILENCE = 0.2
 
 # Fish inline markup the AI may sprinkle into scripts for delivery/SFX.
 # Emotion tones wrap the phrase that should carry the emotion; SFX/pauses are
@@ -113,6 +122,7 @@ WHISPER_COMPUTE = "float16"  # 5080 has the VRAM; keeps quality high
 WHISPER_LANGUAGE = "zh"
 WHISPER_BATCH_SIZE = 16      # BatchedInferencePipeline throughput on the 5080
 WHISPER_CPU_THREADS = 16     # 9950X3D feeds the GPU (feature extraction / VAD)
+WHISPER_INITIAL_PROMPT = "游戏王MD, 官方绿卡, 网易BUFF, 倒余额, 初始号, 手机令牌, 改密码, 改绑邮箱, 有偿钻, 无偿钻, 区服, 钉死"
 
 # --- chapters (Bilibili) ----------------------------------------------------
 # Bilibili reads "MM:SS Title" / "HH:MM:SS Title" lines; first MUST be 00:00.

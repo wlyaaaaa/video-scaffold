@@ -43,6 +43,27 @@ def _bg_duration():
     return float(out.stdout.strip())
 
 
+def _chunk_nframes(path):
+    """Coded frame count of a chunk - fast (counts packets, no decode).
+
+    This is the guard that keeps audio and video in lock-step. A chunk that
+    encoded FEWER frames than it was fed (NVENC session pressure under many
+    workers makes ffmpeg exit 0 yet drop frames) used to slip past the old
+    `size > 0` check; once concatenated, every later frame slid earlier than its
+    narration -> the "3:47 音画不同步" drift. We now reject any chunk whose frame
+    count != expected. Returns -1 on probe failure so an error is treated as a
+    bad chunk, never a silent pass."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets",
+             "-show_entries", "stream=nb_read_packets",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, check=True)
+        return int(out.stdout.strip())
+    except Exception:
+        return -1
+
+
 def build_timeline(scene_html_paths, durations):
     """[{html, start, end, fade_in_end, fade_out_start}] in global seconds."""
     timeline, acc = [], 0.0
@@ -180,8 +201,16 @@ async def _worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg
                               f"({100*c/total_frames:5.1f}%)  {c/el:5.1f} fps", end="", flush=True)
             proc.stdin.close()
             rc = proc.wait(timeout=600)   # NVENC contention under many workers needs headroom
-            ok = (rc == 0 and os.path.exists(chunk_out) and os.path.getsize(chunk_out) > 0)
+            # A chunk is only good if ffmpeg succeeded AND wrote exactly the frames
+            # we fed it. The frame-count check is what prevents silent A/V drift.
+            ok = (rc == 0 and os.path.exists(chunk_out) and os.path.getsize(chunk_out) > 0
+                  and _chunk_nframes(chunk_out) == len(frames))
             if not ok:
+                try:                        # drop the short/partial file so the retry rewrites cleanly
+                    if os.path.exists(chunk_out):
+                        os.remove(chunk_out)
+                except OSError:
+                    pass
                 with counter.get_lock():    # rewind the progress for the retry
                     counter.value -= len(frames)
             return ok
@@ -246,17 +275,24 @@ def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_worke
     for p in procs:
         p.join()
 
-    # lossless concat of chunks (robust: never silently truncate at a bad chunk)
+    # lossless concat of chunks (robust: never silently truncate OR drift). Each
+    # chunk must exist, be non-empty, AND hold exactly its expected frame count -
+    # the last check is what guarantees the muxed audio stays in sync end to end.
+    def _expected(i):
+        start_idx = i * chunk_frames
+        return min(start_idx + chunk_frames, total_frames) - start_idx
     def _bad(i):
         path = os.path.join(config.DIR_OUTPUT, f"_chunk_{i:05d}.mp4")
-        return (not os.path.exists(path)) or os.path.getsize(path) == 0
+        if (not os.path.exists(path)) or os.path.getsize(path) == 0:
+            return True
+        return _chunk_nframes(path) != _expected(i)
     missing = [i for i in range(total_chunks) if _bad(i)]
     if missing:
         raise RuntimeError(
-            f"[render] {len(missing)}/{total_chunks} chunks missing or empty "
-            f"(first few: {missing[:8]}); aborting rather than producing a gappy/truncated "
-            f"video. If this rises with more workers it is likely the NVENC session cap - "
-            f"lower NUM_WORKERS.")
+            f"[render] {len(missing)}/{total_chunks} chunks missing/empty/short "
+            f"(first few: {missing[:8]}); aborting rather than producing a gappy or "
+            f"out-of-sync video. If this rises with more workers it is the NVENC session "
+            f"cap dropping frames - lower NUM_WORKERS.")
     concat_list = os.path.join(config.DIR_OUTPUT, "_concat.txt")
     with open(concat_list, "w", encoding="utf-8") as f:
         for i in range(total_chunks):
@@ -264,6 +300,14 @@ def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_worke
     subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                     "-f", "concat", "-safe", "0", "-i", concat_list,
                     "-c", "copy", out_path], check=True)
+
+    # final guarantee: the stitched track must hold every frame the timeline asked
+    # for, so it lines up with the narration to the frame when muxed.
+    got = _chunk_nframes(out_path)
+    if got != total_frames:
+        raise RuntimeError(
+            f"[render] stitched track has {got} frames, expected {total_frames} "
+            f"({(total_frames-got)/config.FPS:+.2f}s) - refusing to ship an out-of-sync video.")
 
     os.remove(concat_list)
     for i in range(total_chunks):

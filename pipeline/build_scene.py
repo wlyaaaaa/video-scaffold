@@ -56,6 +56,37 @@ def _char_index(words):
     return "".join(text), times
 
 
+_CN = {'零':'0','〇':'0','一':'1','二':'2','两':'2','三':'3','四':'4','五':'5','六':'6','七':'7','八':'8','九':'9'}
+_UNIT = {'十':10,'百':100,'千':1000,'万':10000,'亿':100000000}
+
+
+def _cn_value(run):
+    """Parse a Chinese-numeral run to its Arabic value string (三十六->36, 一千->1000)."""
+    total = section = cur = 0
+    for ch in run:
+        if ch in _CN:
+            cur = int(_CN[ch])
+        elif ch in _UNIT:
+            u = _UNIT[ch]
+            if u >= 10000:
+                section = (section + cur) * u; total += section; section = 0
+            else:
+                cur = cur or 1; section += cur * u
+            cur = 0
+    return str(total + section + cur)
+
+
+def _cue_variants(phrase):
+    """Whisper writes numbers as Arabic digits; offer numeral-normalised candidates."""
+    cands = [phrase]
+    conv = re.sub(r'[零〇一二两三四五六七八九十百千万亿]+', lambda m: _cn_value(m.group(0)), phrase)
+    if conv != phrase:
+        cands.append(conv)
+    if phrase and all(c in _CN for c in phrase):      # spoken digit-string e.g. 七四八 -> 748
+        cands.append(''.join(_CN[c] for c in phrase))
+    return cands
+
+
 def resolve_cues(fragment, words):
     """Rewrite every data-cue="phrase" into data-delay="t" using the timeline."""
     if not words:
@@ -63,12 +94,12 @@ def resolve_cues(fragment, words):
     full, times = _char_index(words)
 
     def repl(m):
-        phrase = re.sub(r"\s", "", m.group(1))
-        idx = full.find(phrase)
-        if idx < 0:
-            print(f"[scene] WARN cue not found in narration: {m.group(1)!r}")
-            return ""  # drop cue; keep any existing data-delay
-        return f' data-delay="{times[idx]:.3f}"'
+        for cand in _cue_variants(re.sub(r"\s", "", m.group(1))):
+            idx = full.find(cand)
+            if idx >= 0:
+                return f' data-delay="{times[idx]:.3f}"'
+        print(f"[scene] WARN cue not found in narration: {m.group(1)!r}")
+        return ""  # drop cue; keep any existing data-delay
 
     return re.sub(r'\s*data-cue="([^"]*)"', repl, fragment)
 

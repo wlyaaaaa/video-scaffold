@@ -32,8 +32,10 @@ demo 用 Fish Audio **免费模型** `s2.1-pro-free` + **央视音色** referenc
 ```
 config.py                  # ⭐ 集中声明式配置，先读这里
 secret_local.py            # API key（git-ignored，不入库）
-templates/scene_base.html  # ⭐ 通用 SVG 底板 + 声明式动画运行时
-templates/cover_base.html  # 4K 矢量封面底板
+templates/scene_base.html  # ⭐ 通用 SVG 底板 + 声明式动画运行时（含 ?dur= 预览自驱循环）
+templates/cover_base.html  # 4K 矢量封面底板（通用）
+templates/cover_md.html    # 实拍封面 16:9（青瓷玻璃矢量底）
+templates/cover_md_43.html # 实拍封面 4:3（原画毛玻璃底，cover-fit 不变形）
 background/
   background_4k.mp4         # 通用 4K 60s 无缝循环流体玻璃背景（所有视频共用）
   fluid_glass.comp         # 背景着色器源码
@@ -47,10 +49,11 @@ pipeline/
   author.py       # 3.1 组装大模型 Prompt（script+srt+asset+规范）
   components.py   # 可复用场景组件（标题/数据条/引用/指示箭头/封底…）
   build_scene.py  # 3.2/4a 片段嵌底板 + 解析 data-cue -> scene_html/scene_NN.html
+  preview.py      # 3.5 渲染前自检：output/preview.html 全场景「动态」网格预览
   render.py       # 4 逐帧抓取前景叠加到「循环」4K 背景 + 转场 + 电影感 (NVENC AV1)
   merge.py        # 5 配音拼接 + BGM 闪避混音 + 合成 final_output.mp4
-  cover.py        # 6a 4K 矢量封面 -> output/cover.png
-  chapters.py     # 6b B站章节 output/chapters.txt
+  cover.py        # 6a 4K 矢量封面 -> output/cover.png（通用底板）
+  chapters.py     # 6b B站章节 output/chapters.txt（+ 实拍项目的 章节管理.txt）
   cleanup.py      # 6c/6d 临时清理 + 就绪自检
 docs/AUTHORING.md # 写给 AI 的场景创作指南
 docs/VOICE.md     # Fish 情感/音效标记指南
@@ -125,6 +128,44 @@ marker（用 `marker-end="url(#arrow)"`）。
 
 ---
 
+## 实拍项目工具链（build_v2.py + v2lib.py）
+
+demo / 上面那套走的是通用 `author.py` 路径（大模型吐 SVG）。本仓库的成片
+**《游戏王MD氪金指南》**走的是更直接的**手写组件**路径：23 个场景全部在
+[`build_v2.py`](build_v2.py) 里用 [`v2lib.py`](v2lib.py) 的组件函数拼出（标题 /
+对比条 / 对照表 / 时间轴 / 流程令牌 / 截图聚焦推镜 / 天平 / 账本…），真相源
+`assets/氪金指南_v2数据与分镜.md`。`s00` 是 17s 冷启动开头（先勾人，再由 s01 自我
+介绍），其后 `s01..s21` 是正片，全片 ≈ 9:47。
+
+一个命令一个阶段：`python build_v2.py <stage>`
+
+| 阶段 | 作用 |
+|---|---|
+| `build`    | 片段嵌底板 → `scene_html/`（**改文案/分镜后先跑这个**） |
+| `preview`  | **渲染前自检**：生成 `output/preview.html`，浏览器里逐场景「动态」循环播放 |
+| `render`   | 逐帧抓取叠背景 → `video_track.mp4`，**自动接 merge** 出带声音的 `final_output.mp4` |
+| `cover`    | `output/cover.png`(16:9 矢量) + `output/cover_4x3.png`(4:3 原画毛玻璃底) |
+| `chapters` | `output/chapters.txt` + `章节管理.txt`（B站章节，可直接粘进「章节文本编辑器」） |
+| `scripts`/`tts`/`timing` | 文案落盘 / Fish 合成 / 时长+词级时间轴 |
+| `all`      | 以上全跑一遍 |
+
+**渲染前先 preview。** 渲染是唯一耗时步骤（NVENC 多分钟）。`build` 后跑 `preview`，
+双击 `output/preview.html`：每个场景在网格里循环自播（无声、无转场、带真背景），
+可拖动缩放、暂停，5 秒就能抓出错位 / 文字溢出 / cue 不对，改完再 `render`。原理：
+场景被 `?dur=秒` 打开时，底板运行时**自驱一个 rAF 循环**（见 `scene_base.html` 末尾，
+渲染器不带该参数，逐帧 `seekTime` 不受影响），每个 iframe 各驱各的，`file://` 直接打开即可。
+
+> ⚠️ **别再跑 `tts` / `all`**：`raw_audio/` 已是审过的配音；重合成会改时长、需重新过审。
+> 加开头时是「整体后移一位、只合成新开头那一条」来保住其余 22 条配音的。日常迭代
+> 固定走 **`build → preview →（满意）render`**。
+
+**音画同步铁律仍在**：cue 只能打在**旁白真说出来的词**上（屏幕上的字/数字不算）。
+若 `build` 打印 `WARN cue not found`，说明该词 Whisper 没那么转（如「盗刷」听成
+「倒刷」、「价钉死」听成「价盯死」），元素会退回 `data-delay` 兜底——把 cue 改成
+Whisper 实际转出的词即可（当前 0 警告）。
+
+---
+
 ## 成片质感
 
 - **可复用组件**（`pipeline/components.py`）：`title_block` / `stat_panel` / `stat_bar`
@@ -155,13 +196,13 @@ marker（用 `marker-end="url(#arrow)"`）。
 - **内存（解除 worker 上限）**：每个 worker 只保留 `MAX_PAGES_PER_WORKER`(默认 3) 个
   常驻页（LRU），而非「每个场景一页」。19 场景时内存从 O(worker×场景) 降到
   O(worker×3)——这正是过去 5 个 worker 就爆内存的根因。内存降下来后可把
-  `NUM_WORKERS` 往上调（注意 GeForce 的 NVENC 并发会话上限，调太高某些切片会编码失败）。
+  `NUM_WORKERS` 往上调（项目已优化并设置为 `6`，能完美吃满你的 5080 和 9950X3D，避免编码会话溢出的同时最大化多核性能）。
 - **抗中断缝合**：每个切片 ffmpeg 失败会自动重试 `CHUNK_RETRIES`(默认 2) 次；合并前
   校验所有切片**存在且非空**，缺一即报错中止，**绝不**产出有缺口/被截断的成片。
 - **自适应切片**：短视频也能喂满所有 worker（修了「13s 只用 3 核」）。
 - **NVENC AV1** `p6 + spatial/temporal-AQ + lookahead`，4K 近视觉无损、体积小。
 - **Whisper**：`large-v3` cuda/float16 + `BatchedInferencePipeline`(batch 16) + VAD，
-  cpu_threads=16，长音频吞吐显著提升。
+  cpu_threads=16，长音频吞吐显著提升。支持 `config.WHISPER_INITIAL_PROMPT` 热词表注入，从根本上解决游戏特定词（如“倒余额”、“区服”）在通用 ASR 识别时的同音错字问题。
 - **背景循环修复**：背景片只有 60s。渲染用 `-stream_loop -1` + `起始时间 % 背景时长`
   取模，任意总时长都不再出现「设 15 分钟却只有 1 分钟背景」的空帧。
 - **时长是唯一真相**：`durations.json` 决定每个场景的精确帧数。
@@ -190,3 +231,7 @@ marker（用 `marker-end="url(#arrow)"`）。
 
 唯一留作接口的是 `author.generate()`——把组装好的 Prompt 真正发给某个大模型 API、
 自动落 `scene_NN.html`。底板就是为它设计的（模型只需吐一小段 SVG 片段）；接上 key 即全自动。
+
+**实拍成片现状**：《游戏王MD氪金指南》（`build_v2.py`）已全程就绪——23 场景（含 17s 冷启动
+开头 s00）、配音/词级时间轴/0 cue 警告、两版封面、11 章节、`preview.html` 全场景动态自检。
+渲染前 `build → preview` 自检无误后，一条 `render` 即出带声音的 `output/final_output.mp4`。
