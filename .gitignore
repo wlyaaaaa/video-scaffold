@@ -20,6 +20,12 @@ venv/
 # backup archive (built into the project dir)
 video-scaffold-backup.zip
 
+# user-supplied music + per-project builders (not part of the scaffold)
+*.mp3
+*.wav
+*.m4a
+/build_md_scenes.py
+
 # misc
 .cache/
 *.log

@@ -53,15 +53,18 @@ def mux(video_track, audio_track, out_path=FINAL, bgm_path=None):
     if audio_track and bgm_path:
         dur = _probe_seconds(audio_track)
         fade_st = max(0.0, dur - 1.2)
-        # 0:v video, 1:a narration, 2:a music
+        # inputs: 0=video, 1=narration, 2=music (looped at the demuxer, NOT
+        # buffered in RAM). Both audios forced to stereo so sidechaincompress /
+        # amix never trip on a mono-vs-stereo layout mismatch; alimiter guards
+        # against clipping from normalize=0.
         filt = (
-            f"[2:a]aformat=channel_layouts=stereo,aloop=loop=-1:size=2147483647,"
-            f"volume={config.BGM_VOLUME}[m];"
-            f"[m][1:a]sidechaincompress=threshold=0.03:ratio=8:attack=5:release=300[md];"
-            f"[1:a][md]amix=inputs=2:duration=first:normalize=0,"
-            f"afade=t=out:st={fade_st:.2f}:d=1.2[aout]"
+            f"[1:a]aformat=channel_layouts=stereo,asplit=2[nar][narkey];"
+            f"[2:a]aformat=channel_layouts=stereo,volume={config.BGM_VOLUME}[mus];"
+            f"[mus][narkey]sidechaincompress=threshold=0.03:ratio=8:attack=5:release=300[duck];"
+            f"[nar][duck]amix=inputs=2:duration=first:normalize=0,"
+            f"alimiter=limit=0.95,afade=t=out:st={fade_st:.2f}:d=1.2[aout]"
         )
-        cmd += ["-i", audio_track, "-i", bgm_path,
+        cmd += ["-i", audio_track, "-stream_loop", "-1", "-i", bgm_path,
                 "-filter_complex", filt, "-map", "0:v", "-map", "[aout]",
                 "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest"]
     elif audio_track:

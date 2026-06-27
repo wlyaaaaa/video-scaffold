@@ -22,8 +22,10 @@ import os
 import sys
 import time
 import queue
+import base64
 import asyncio
 import subprocess
+from collections import OrderedDict
 from multiprocessing import Process, Value, Lock, Queue
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -79,6 +81,24 @@ def _envelope_at(scene, t):
     return op, ""   # "fade"
 
 
+def _chunk_cmd(bg_offset, chunk_dur, chunk_out):
+    vfilter = "[0:v][1:v]overlay=0:0:shortest=1"
+    if config.CINEMATIC:
+        if config.VIGNETTE_ANGLE > 0:
+            vfilter += f",vignette=angle={config.VIGNETTE_ANGLE}"
+        if config.GRAIN > 0:
+            vfilter += f",noise=alls={config.GRAIN}:allf=t"
+    return [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-stream_loop", "-1", "-ss", f"{bg_offset:.3f}", "-t", f"{chunk_dur:.3f}",
+        "-i", config.BG_VIDEO,
+        "-f", "image2pipe", "-vcodec", "png", "-r", str(config.FPS), "-i", "-",
+        "-filter_complex", vfilter,
+        "-c:v", config.VCODEC, *config.NVENC_EXTRA, "-cq", config.CQ,
+        "-an", "-threads", "2", chunk_out,
+    ]
+
+
 async def _worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg_dur, chunk_frames):
     from playwright.async_api import async_playwright
     async with async_playwright() as p:
@@ -89,76 +109,100 @@ async def _worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg
             browser = await p.chromium.launch(headless=True)
         ctx = await browser.new_context(viewport={"width": config.WIDTH, "height": config.HEIGHT})
 
-        pages = {}
-        for s in timeline:
-            if s["html"] not in pages:
-                page = await ctx.new_page()
-                await page.goto(f"file://{s['html']}")
-                pages[s["html"]] = page
+        # LRU of warm pages: cap memory at MAX_PAGES per worker instead of one
+        # page per scene (the all-scenes preload was the OOM driver).
+        cache = OrderedDict()   # html -> {"page", "cdp"}
+
+        async def get_entry(html):
+            if html in cache:
+                cache.move_to_end(html)
+                return cache[html]
+            page = await ctx.new_page()
+            await page.goto(f"file://{html}")
+            cdp = None
+            if config.SCREENSHOT_FAST:
+                try:    # transparent bg so CDP captureScreenshot keeps alpha
+                    cdp = await ctx.new_cdp_session(page)
+                    await cdp.send("Emulation.setDefaultBackgroundColorOverride",
+                                   {"color": {"r": 0, "g": 0, "b": 0, "a": 0}})
+                except Exception:
+                    cdp = None
+            cache[html] = {"page": page, "cdp": cdp}
+            cache.move_to_end(html)
+            while len(cache) > max(1, config.MAX_PAGES_PER_WORKER):
+                _, old = cache.popitem(last=False)
+                try: await old["page"].close()
+                except Exception: pass
+            return cache[html]
+
+        async def grab(entry):
+            if entry["cdp"] is not None:
+                try:   # optimizeForSpeed: lighter PNG -> faster encode AND decode
+                    r = await entry["cdp"].send("Page.captureScreenshot",
+                                                {"format": "png", "optimizeForSpeed": True,
+                                                 "captureBeyondViewport": False})
+                    return base64.b64decode(r["data"])
+                except Exception:
+                    entry["cdp"] = None
+            return await entry["page"].screenshot(type="png", omit_background=True)
+
+        async def render_chunk(chunk_idx):
+            start_idx = chunk_idx * chunk_frames
+            end_idx = min(start_idx + chunk_frames, total_frames)
+            frames = list(range(start_idx, end_idx))
+            if not frames:
+                return True
+            chunk_dur = len(frames) / float(config.FPS)
+            bg_offset = (frames[0] / float(config.FPS)) % bg_dur   # loop the background
+            chunk_out = os.path.join(config.DIR_OUTPUT, f"_chunk_{chunk_idx:05d}.mp4")
+
+            proc = subprocess.Popen(_chunk_cmd(bg_offset, chunk_dur, chunk_out),
+                                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE)
+            for idx in frames:
+                t = idx / float(config.FPS)
+                scene = _scene_at(timeline, t)
+                entry = await get_entry(scene["html"])
+                op, tf = _envelope_at(scene, t)
+                await entry["page"].evaluate(
+                    f"if(window.seekTime) window.seekTime({t - scene['start']});"
+                    f"document.body.style.opacity={op};"
+                    f"document.body.style.transform='{tf}';")
+                proc.stdin.write(await grab(entry))
+                proc.stdin.flush()
+                with counter.get_lock():
+                    counter.value += 1
+                    c = counter.value
+                if c % 30 == 0:
+                    with lock:
+                        el = time.time() - t0
+                        print(f"\r  render {c}/{total_frames} "
+                              f"({100*c/total_frames:5.1f}%)  {c/el:5.1f} fps", end="", flush=True)
+            proc.stdin.close()
+            rc = proc.wait(timeout=600)   # NVENC contention under many workers needs headroom
+            ok = (rc == 0 and os.path.exists(chunk_out) and os.path.getsize(chunk_out) > 0)
+            if not ok:
+                with counter.get_lock():    # rewind the progress for the retry
+                    counter.value -= len(frames)
+            return ok
 
         while True:
             try:
                 chunk_idx = task_queue.get_nowait()
             except queue.Empty:
                 break
+            for attempt in range(config.CHUNK_RETRIES + 1):
+                try:
+                    if await render_chunk(chunk_idx):
+                        break
+                except Exception as e:
+                    print(f"\n  [worker] chunk {chunk_idx} attempt {attempt+1} error: {e}")
+                if attempt < config.CHUNK_RETRIES:
+                    await asyncio.sleep(1.0)   # let transient NVENC pressure clear
 
-            start_idx = chunk_idx * chunk_frames
-            end_idx = min(start_idx + chunk_frames, total_frames)
-            frames = list(range(start_idx, end_idx))
-            if not frames:
-                continue
-
-            chunk_start_t = frames[0] / float(config.FPS)
-            chunk_dur = len(frames) / float(config.FPS)
-            bg_offset = chunk_start_t % bg_dur          # <-- loop the background
-            chunk_out = os.path.join(config.DIR_OUTPUT, f"_chunk_{chunk_idx:05d}.mp4")
-
-            # cinematic finishing baked in-line (parallel across chunks)
-            vfilter = "[0:v][1:v]overlay=0:0:shortest=1"
-            if config.CINEMATIC:
-                if config.VIGNETTE_ANGLE > 0:
-                    vfilter += f",vignette=angle={config.VIGNETTE_ANGLE}"
-                if config.GRAIN > 0:
-                    vfilter += f",noise=alls={config.GRAIN}:allf=t"
-            cmd = [
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-stream_loop", "-1", "-ss", f"{bg_offset:.3f}", "-t", f"{chunk_dur:.3f}",
-                "-i", config.BG_VIDEO,
-                "-f", "image2pipe", "-vcodec", "png", "-r", str(config.FPS), "-i", "-",
-                "-filter_complex", vfilter,
-                "-c:v", config.VCODEC, *config.NVENC_EXTRA, "-cq", config.CQ,
-                "-an", "-threads", "2", chunk_out,
-            ]
-            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-            try:
-                for idx in frames:
-                    t = idx / float(config.FPS)
-                    scene = _scene_at(timeline, t)
-                    t_local = t - scene["start"]
-                    page = pages[scene["html"]]
-                    op, tf = _envelope_at(scene, t)
-                    await page.evaluate(
-                        f"if(window.seekTime) window.seekTime({t_local});"
-                        f"document.body.style.opacity={op};"
-                        f"document.body.style.transform='{tf}';")
-                    png = await page.screenshot(type="png", omit_background=True)
-                    proc.stdin.write(png)
-                    proc.stdin.flush()
-                    with counter.get_lock():
-                        counter.value += 1
-                        c = counter.value
-                    if c % 30 == 0:
-                        with lock:
-                            el = time.time() - t0
-                            print(f"\r  render {c}/{total_frames} "
-                                  f"({100*c/total_frames:5.1f}%)  {c/el:5.1f} fps", end="", flush=True)
-                proc.stdin.close()
-                proc.wait(timeout=60)
-            except Exception as e:
-                try: proc.kill()
-                except Exception: pass
-                print(f"\n  [worker] chunk {chunk_idx} failed: {e}")
+        for entry in cache.values():
+            try: await entry["page"].close()
+            except Exception: pass
         await browser.close()
 
 
@@ -202,7 +246,17 @@ def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_worke
     for p in procs:
         p.join()
 
-    # lossless concat of chunks
+    # lossless concat of chunks (robust: never silently truncate at a bad chunk)
+    def _bad(i):
+        path = os.path.join(config.DIR_OUTPUT, f"_chunk_{i:05d}.mp4")
+        return (not os.path.exists(path)) or os.path.getsize(path) == 0
+    missing = [i for i in range(total_chunks) if _bad(i)]
+    if missing:
+        raise RuntimeError(
+            f"[render] {len(missing)}/{total_chunks} chunks missing or empty "
+            f"(first few: {missing[:8]}); aborting rather than producing a gappy/truncated "
+            f"video. If this rises with more workers it is likely the NVENC session cap - "
+            f"lower NUM_WORKERS.")
     concat_list = os.path.join(config.DIR_OUTPUT, "_concat.txt")
     with open(concat_list, "w", encoding="utf-8") as f:
         for i in range(total_chunks):

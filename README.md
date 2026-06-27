@@ -149,15 +149,26 @@ marker（用 `marker-end="url(#arrow)"`）。
 
 ## 性能（RTX 5080 + 9950X3D 最大化）
 
-- **渲染**：8 进程常驻无头 Chromium 池并行抓帧；切片大小**自适应**，短视频也能喂满
-  8 核（修了「13s 只用 3 核」）。NVENC AV1 `p6 + spatial/temporal-AQ + lookahead`，
-  4K 接近视觉无损、体积小。实测 ~10–15 fps@4K 抓帧（瓶颈是 4K 截图，非编码）。
+- **快速截图（最大提速点）**：用 CDP `Page.captureScreenshot` + `optimizeForSpeed`
+  取代 `page.screenshot`，4K 透明帧实测 **~2.0× 提速**（12.7→25.4 fps），像素无损
+  （只改 PNG 压缩力度，画面不变）。`config.SCREENSHOT_FAST`。
+- **内存（解除 worker 上限）**：每个 worker 只保留 `MAX_PAGES_PER_WORKER`(默认 3) 个
+  常驻页（LRU），而非「每个场景一页」。19 场景时内存从 O(worker×场景) 降到
+  O(worker×3)——这正是过去 5 个 worker 就爆内存的根因。内存降下来后可把
+  `NUM_WORKERS` 往上调（注意 GeForce 的 NVENC 并发会话上限，调太高某些切片会编码失败）。
+- **抗中断缝合**：每个切片 ffmpeg 失败会自动重试 `CHUNK_RETRIES`(默认 2) 次；合并前
+  校验所有切片**存在且非空**，缺一即报错中止，**绝不**产出有缺口/被截断的成片。
+- **自适应切片**：短视频也能喂满所有 worker（修了「13s 只用 3 核」）。
+- **NVENC AV1** `p6 + spatial/temporal-AQ + lookahead`，4K 近视觉无损、体积小。
 - **Whisper**：`large-v3` cuda/float16 + `BatchedInferencePipeline`(batch 16) + VAD，
-  9950X3D 喂数据（cpu_threads=16），长音频吞吐显著提升。
+  cpu_threads=16，长音频吞吐显著提升。
 - **背景循环修复**：背景片只有 60s。渲染用 `-stream_loop -1` + `起始时间 % 背景时长`
   取模，任意总时长都不再出现「设 15 分钟却只有 1 分钟背景」的空帧。
 - **时长是唯一真相**：`durations.json` 决定每个场景的精确帧数。
 - **音频零损拼接**：同一 TTS 批次编码一致，`merge.concat_audio` 直接 `-c copy`。
+- **BGM 缝合稳健**：背景乐用 `-stream_loop -1`（解复用层循环，**不**把整轨灌进内存，
+  修了 `aloop` 巨量缓冲可能爆内存的隐患）；旁白/音乐统一为立体声再做 sidechain 闪避，
+  末尾 `alimiter` 防削顶——音轨/画面一定缝得起来。
 
 ## 配置要点
 

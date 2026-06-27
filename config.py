@@ -50,6 +50,12 @@ NVENC_EXTRA = ["-preset", "p6", "-tune", "hq", "-rc", "constqp",
 NUM_WORKERS = 8           # 9950X3D physical cores for the render pool
 CHUNK_FRAMES = 300        # max frames per ffmpeg chunk (5 s @ 60fps); the
                           # renderer shrinks this so short videos still use all cores
+# Each worker keeps at most this many scene pages warm (LRU). Caps memory at
+# O(workers x MAX_PAGES) instead of O(workers x scenes) - the old all-scenes
+# preload was the OOM driver that capped the pool at ~5 workers.
+MAX_PAGES_PER_WORKER = 3
+CHUNK_RETRIES = 2         # re-attempt a chunk's ffmpeg on transient failure
+SCREENSHOT_FAST = True    # CDP optimizeForSpeed PNG (faster encode + decode)
 
 # --- design system (the global visual contract) -----------------------------
 # Dark celadon text on transparent foreground; no cards/borders/shadows.
