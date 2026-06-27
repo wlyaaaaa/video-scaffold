@@ -213,11 +213,18 @@ async def _worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg
                               f"({100.0 * prog_frames / total_frames:5.1f}%)  {actual_fps:5.1f} fps", end="", flush=True)
             proc.stdin.close()
             rc = proc.wait(timeout=600)   # NVENC contention under many workers needs headroom
+            err_msg = ""
+            try:
+                if proc.stderr:
+                    err_msg = proc.stderr.read().decode('utf-8', errors='ignore')
+            except Exception:
+                pass
             # A chunk is only good if ffmpeg succeeded AND wrote exactly the frames
             # we fed it. The frame-count check is what prevents silent A/V drift.
             ok = (rc == 0 and os.path.exists(chunk_out) and os.path.getsize(chunk_out) > 0
                   and _chunk_nframes(chunk_out) == len(frames))
             if not ok:
+                print(f"\n  [worker] chunk {chunk_idx} failed! ffmpeg rc={rc}, error output:\n{err_msg}")
                 try:                        # drop the short/partial file so the retry rewrites cleanly
                     if os.path.exists(chunk_out):
                         os.remove(chunk_out)
