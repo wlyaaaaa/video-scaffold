@@ -103,7 +103,7 @@ def _envelope_at(scene, t):
 
 
 def _chunk_cmd(bg_offset, chunk_dur, chunk_out):
-    vfilter = "[0:v][1:v]overlay=0:0:shortest=1"
+    vfilter = f"[0:v]trim=start={bg_offset:.3f},setpts=PTS-STARTPTS[bg]; [bg][1:v]overlay=0:0:shortest=1"
     if config.CINEMATIC:
         if config.VIGNETTE_ANGLE > 0:
             vfilter += f",vignette=angle={config.VIGNETTE_ANGLE}"
@@ -111,7 +111,7 @@ def _chunk_cmd(bg_offset, chunk_dur, chunk_out):
             vfilter += f",noise=alls={config.GRAIN}:allf=t"
     return [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-        "-stream_loop", "-1", "-ss", f"{bg_offset:.3f}",
+        "-stream_loop", "-1",
         "-i", config.BG_VIDEO,
         "-f", "image2pipe", "-vcodec", "png", "-r", str(config.FPS), "-i", "-",
         "-filter_complex", vfilter,
