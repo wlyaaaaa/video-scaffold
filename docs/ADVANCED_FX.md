@@ -79,6 +79,7 @@ L.coin_fountain(x=1920, y=1500, cue="收益")                                   
 | `L.pulse_badge("当前最优", cue="最优")` | 呼吸辉光徽章（`pulse`） | "亲测可行/最划算"标记 |
 | `L.card_flip(inner, cue="揭示")` | 游戏王卡牌翻转揭示（`flip`，3D rotateY） | 主题契合的揭示/反转 |
 | `L.ambient_motes(n=22)` | 背景缓慢游走光点（`drift`，种子相位） | 加高级氛围、不抢戏（默认右侧空域避开文字） |
+| `L.gauge(82, zones=[(0.4,ACCENT),(0.7,GOLD),(1.0,RED)], title="代充封号风险", unit="%")` | 半圆仪表盘，指针从 lo 扫到 value（复用 `tilt` 原语） | 代充封号风险 / 折扣力度 / 收益率 |
 
 ---
 

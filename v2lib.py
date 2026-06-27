@@ -600,17 +600,24 @@ def coin_fountain(x=CX, y=1500, cue=None, delay=0.0, n=70, token="¥"):
     复用确定性 burst 引擎，只是调参更"币"。"""
     return particle_burst(x, y, cue=cue, delay=delay, n=n, colors=[GOLD, "#E8C46A", "#F2D98A"],
                           rmin=14, rmax=30, vmin=700, vmax=1700, life=1.6, g=1100, up_bias=0.62,
-                          seed=abs(hash((x, y, token))) & 0xffff)
+                          seed=int(x) * 131 + int(y) * 17 + len(token))   # stable, no str-hash
 
 
-# closed-padlock and open-padlock outlines (same node budget) for market unlock
-_LOCK_SHUT = "M-70,-10 L70,-10 L70,120 L-70,120 Z M-46,-10 L-46,-58 A46,46 0 0 1 46,-58 L46,-10"
-_LOCK_OPEN = "M-70,-10 L70,-10 L70,120 L-70,120 Z M-46,-10 L-46,-58 A46,46 0 0 1 46,-58 L46,-92"
+# Only the SHACKLE morphs (single open subpath M-L-A-L, same node budget); the
+# body is a static rect. morph resamples one subpath cleanly — a multi-subpath
+# outline would draw a stray join line, so keep the moving part single-subpath.
+_SHACKLE_SHUT = "M-46,-6 L-46,-58 A46,46 0 0 1 46,-58 L46,-6"
+_SHACKLE_OPEN = "M-46,-6 L-46,-58 A46,46 0 0 1 46,-58 L46,-92"
 def lock_unlock(x=CX, y=CY, cue=None, delay=0.4, dur=1.0, color=None):
-    """令牌/市场解锁：闭锁的锁梁顺滑morph成开锁（15天解锁市场、绑令牌→可交易）。"""
+    """令牌/市场解锁：锁梁顺滑morph成开锁（15天解锁市场、绑令牌→可交易）。锁体静止、
+    只有锁梁右脚抬起 = 解锁。"""
     color = color or ACCENT
-    return morph_path(_LOCK_SHUT, _LOCK_OPEN, x=x, y=y, cue=cue, delay=delay, dur=dur,
-                      stroke=color, sw=12, samples=80)
+    body = (f'<rect data-anim="pop" {_t(cue,delay,0.5)} x="-70" y="-6" width="140" height="120" rx="20" '
+            f'fill="none" stroke="{color}" stroke-width="12"/>')
+    keyhole = f'<circle data-anim="fade" {_t(cue,delay+0.2,0.4)} cx="0" cy="48" r="13" fill="{color}"/>'
+    shackle = morph_path(_SHACKLE_SHUT, _SHACKLE_OPEN, x=0, y=0, cue=cue, delay=delay + 0.25,
+                         dur=dur, stroke=color, sw=12, samples=64)
+    return f'<g transform="translate({x},{y})">{body}{keyhole}{shackle}</g>'
 
 
 def ambient_motes(n=26, cue=None, delay=0.0, color=None, area=None, seed=7):
@@ -629,4 +636,44 @@ def ambient_motes(n=26, cue=None, delay=0.0, color=None, area=None, seed=7):
                    f'data-ax="{ax:.0f}" data-ay="{ay:.0f}" data-fx="{fx:.2f}" data-fy="{fy:.2f}" '
                    f'data-px="{px:.2f}" data-py="{py:.2f}" data-op="{op:.2f}" {_t(cue,delay,0.8)} '
                    f'cx="0" cy="0" r="{r:.1f}" fill="{color}"/></g>')
+    return "".join(out)
+
+
+def gauge(value, lo=0, hi=100, x=CX, y=1240, r=420, cue=None, delay=0.4, title="",
+          unit="", zones=None, needle_color=None, dec=0):
+    """风险/力度/收益 半圆仪表盘：彩色区段 + 指针从 lo 扫到 value。指针复用 `tilt` 原语
+    （纯函数of t），绕表盘中心旋转。zones: [(frac_end, color), ...] 从左(lo)到右(hi)依次上色，
+    如 [(0.5,ACCENT),(0.8,GOLD),(1.0,RED)]。本系列用于"代充封号风险/折扣力度/收益率"。"""
+    needle_color = needle_color or INK
+    frac = 0.0 if hi == lo else max(0.0, min(1.0, (value - lo) / float(hi - lo)))
+    def pt(fr):
+        a = math.radians(180 * (1 - fr))
+        return (x + r * math.cos(a), y - r * math.sin(a))
+    def _arc(fa, fb, stroke, sw, op, d, dur, cap="butt"):
+        # sample the exact circle centered at the hub (no SVG arc-flag ambiguity).
+        n = max(2, int(abs(fb - fa) * 48) + 2)
+        pts = []
+        for k in range(n + 1):
+            ax, ay = pt(fa + (fb - fa) * k / n); pts.append(f"{ax:.1f},{ay:.1f}")
+        return (f'<path data-anim="draw" {_t(cue,d,dur)} d="M{" L".join(pts)}" fill="none" '
+                f'stroke="{stroke}" stroke-width="{sw}" stroke-linecap="{cap}" stroke-linejoin="round" stroke-opacity="{op}"/>')
+    lx, ly = pt(0.0); rx, ry = pt(1.0)
+    out = [_arc(0.0, 1.0, INK, 34, 0.14, delay, 1.0, cap="round")]   # light track
+    if zones:
+        fa = 0.0
+        for i, (fb, col) in enumerate(zones):
+            out.append(_arc(fa, min(fb, 1.0), col, 34, 0.9, delay + 0.1 + i * 0.12, 0.7))
+            fa = fb
+    out.append(text(f"{lo}{unit}", lx, ly + 72, lvl=4, delay=delay + 0.3, anchor="middle", opacity=1))
+    out.append(text(f"{hi}{unit}", rx, ry + 72, lvl=4, delay=delay + 0.3, anchor="middle", opacity=1))
+    out.append(num(value, x, y + 180, lvl=1, cue=cue, delay=delay + 0.5, dur=1.0, suffix=unit,
+                   dec=dec, anchor="middle", fill=needle_color))
+    if title:
+        out.append(text(title, x, y + 280, lvl=3, delay=delay + 0.6, anchor="middle", opacity=1))
+    Ln = int(r * 0.82)                                  # needle pivots at hub: a 0-opacity
+    out.append(f'<g transform="translate({x},{y})">'   # counter-dot balances the bbox so
+               f'<g data-anim="tilt" data-to="{frac*180:.1f}" {_t(cue,delay+0.4,1.1)}>'  # tilt's
+               f'<line x1="0" y1="0" x2="{-Ln}" y2="0" stroke="{needle_color}" stroke-width="14" stroke-linecap="round"/>'  # center == hub
+               f'<circle cx="{Ln}" cy="0" r="2" fill="{needle_color}" fill-opacity="0"/></g>'
+               f'<circle cx="0" cy="0" r="24" fill="{needle_color}"/></g>')
     return "".join(out)

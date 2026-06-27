@@ -4,9 +4,10 @@
 s00 是 17s 冷启动开头(先勾人再自我介绍)，其后 s01..s21 是正片。真相源
 assets/氪金指南_v2数据与分镜.md。组件 v2lib.py。运行时见 templates/scene_base.html。
 
-用法： python build_v2.py [doctor|scripts|tts|timing|build|preview|cover|chapters|render|merge|verify|cleanup|ship|reset|all]
+用法： python build_v2.py [doctor|scripts|tts|timing|build|lint|preview|cover|chapters|render|merge|verify|cleanup|ship|reset|all]
   doctor   渲染前体检：ffmpeg/ffprobe/背景/Fish key/playwright/assets 是否就绪
   build    片段嵌底板 -> scene_html/（改了文案/分镜先跑这个）
+  lint     越界自检：自动找出离开画布的文字(HARD,必修)/离开毛玻璃的元素(soft,看情况)
   preview  生成 output/preview.html，浏览器里逐场景「动态」自检（渲染前必看）
   render   逐帧抓取叠背景 -> video_track.mp4，并自动接 merge 出带声音的成片
   cover    渲染 output/cover.png(16:9) 与 output/cover_4x3.png(4:3，毛玻璃原画底)
@@ -23,7 +24,7 @@ import os, sys, glob, json, pathlib, math
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config, v2lib as L
 from pipeline import fish_tts, durations as dur_mod, transcribe, build_scene, render, merge
-from pipeline import chapters as chapters_mod, preview as preview_mod, cleanup as cleanup_mod
+from pipeline import chapters as chapters_mod, preview as preview_mod, cleanup as cleanup_mod, lint as lint_mod
 
 INK, ACCENT, RED, GOLD = L.INK, L.ACCENT, L.RED, L.GOLD
 M, CX, CY, COL = L.M, L.CX, L.CY, L.COL
@@ -568,12 +569,15 @@ def doctor():
 
 def reset_workspace(confirm):
     """Wipe the regenerable per-project workspace so THIS FOLDER can host the next
-    video. Keeps assets/ (you swap art by hand) and the committed scaffold/code."""
-    targets = [config.DIR_AUDIO, config.DIR_SRT, config.DIR_SCENE, config.DIR_RENDERED, config.DIR_OUTPUT]
+    video. Keeps assets/ (you swap art by hand) and the committed scaffold/code.
+    scripts/ IS cleared: it is regenerated from SCENES by the `scripts` stage, and
+    leaving stale script_NN.txt would let tts/durations pick up phantom scenes."""
+    targets = [config.DIR_SCRIPTS, config.DIR_AUDIO, config.DIR_SRT,
+               config.DIR_SCENE, config.DIR_RENDERED, config.DIR_OUTPUT]
     if confirm != "yes":
-        print("[reset] DRY-RUN. Would DELETE: raw_audio/ srt_data/ scene_html/ rendered/ "
-              "output/ + durations.json")
-        print("[reset] (kept: assets/ scripts/ and all committed code).  Confirm with:")
+        print("[reset] DRY-RUN. Would DELETE: scripts/ raw_audio/ srt_data/ scene_html/ "
+              "rendered/ output/ + durations.json")
+        print("[reset] (kept: assets/ and all committed code).  Confirm with:")
         print("[reset]   python build_v2.py reset yes")
         return
     import shutil as _sh
@@ -616,6 +620,9 @@ def main():
         else:
             transcribe.transcribe_batch()
     scenes = build_all() if stage in ("build", "all") else sorted(glob.glob(os.path.join(config.DIR_SCENE, "scene_*.html")))
+    if stage in ("lint", "all"):        # catch off-canvas text BEFORE the long render
+        durs = _durs() if os.path.exists(config.DURATIONS_JSON) else [6.0] * len(scenes)
+        lint_mod.lint(scenes, durs, names=[s[0] for s in SCENES])
     if stage in ("preview", "all"):
         preview_mod.build(names=[s[0] for s in SCENES])
     if stage in ("cover", "all"):

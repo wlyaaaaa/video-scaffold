@@ -81,7 +81,8 @@ rule(分割线) / chip(药丸) / strike(删除线) / sweep(荧光扫) / arrow / 
 - `gooey_flow(pts)` —— ③ 资金流向流体融合
 - `num_burst(val,...)` / `particle_burst()` / `coin_fountain()` —— ④ 粒子炸裂/金币喷泉
 - `convert(a,"RMB",b,"日元")` 币种换算 · `discount_seal("74.8折")` 折扣印章+冲击波 ·
-  `pulse_badge("当前最优")` 脉冲徽章 · `card_flip(inner)` 卡牌翻转 · `ambient_motes()` 氛围浮尘
+  `pulse_badge("当前最优")` 脉冲徽章 · `card_flip(inner)` 卡牌翻转 · `ambient_motes()` 氛围浮尘 ·
+  `gauge(82,zones=[...])` 风险/力度/收益半圆仪表盘
 
 ---
 
@@ -94,6 +95,7 @@ rule(分割线) / chip(药丸) / strike(删除线) / sweep(荧光扫) / arrow / 
 | `tts` | 旁白→Fish 配音（**幂等**：配音齐全自动跳过；`tts force` 强制重配） |
 | `timing` | ffprobe 时长 + Whisper 词级转写（`all` 里 srt 齐全则跳过；`timing force` 强转） |
 | `build` | 片段嵌底板 → `scene_html/`（**改了文案/分镜先跑这个，盯 0 WARN**） |
+| `lint` | **越界自检**：自动找离开画布的文字(HARD,必修)/离开毛玻璃的元素(soft,看情况)。渲染前先跑，省得 90min 后才发现文字被切 |
 | `preview` | 生成 `output/preview.html`，浏览器逐场景**动态**自检（渲染前必看） |
 | `cover` | 渲染 `output/cover.png`(16:9) 与 `cover_4x3.png` |
 | `chapters` | 生成 `output/chapters.txt` 与 `章节管理.txt`（B 站章节，直接粘贴） |

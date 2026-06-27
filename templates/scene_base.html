@@ -383,9 +383,10 @@
       }
       case "flow-blob": {          // loops along the pipe; goo filter fuses neighbours
         if (t < delay) { el.style.opacity = 0; break; }
-        el.style.opacity = 1;
         if (rec.path && rec.len) {
           let f = (t-delay)*rec.speed + rec.phase; f -= Math.floor(f);
+          // fade in at the source / out at the sink so the loop wrap is invisible
+          el.style.opacity = clamp01(f/0.08) * clamp01((1-f)/0.08);
           try { const pt = rec.path.getPointAtLength(rec.len*f);
             el.style.transform = `translate(${(pt.x-rec.x0).toFixed(2)}px,${(pt.y-rec.y0).toFixed(2)}px)`; } catch(e){}
         }
