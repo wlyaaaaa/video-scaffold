@@ -120,7 +120,7 @@ def _chunk_cmd(bg_offset, chunk_dur, chunk_out):
     ]
 
 
-async def _worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg_dur, chunk_frames):
+async def _worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg_dur, chunk_frames, completed_frames=0):
     from playwright.async_api import async_playwright
     async with async_playwright() as p:
         try:
@@ -204,11 +204,13 @@ async def _worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg
                 with counter.get_lock():
                     counter.value += 1
                     c = counter.value
-                if c % 30 == 0:
+                if (c + completed_frames) % 30 == 0:
                     with lock:
                         el = time.time() - t0
-                        print(f"\r  render {c}/{total_frames} "
-                              f"({100*c/total_frames:5.1f}%)  {c/el:5.1f} fps", end="", flush=True)
+                        actual_fps = c / el if el > 0 else 0.0
+                        prog_frames = c + completed_frames
+                        print(f"\r  render {prog_frames}/{total_frames} "
+                              f"({100.0 * prog_frames / total_frames:5.1f}%)  {actual_fps:5.1f} fps", end="", flush=True)
             proc.stdin.close()
             rc = proc.wait(timeout=600)   # NVENC contention under many workers needs headroom
             # A chunk is only good if ffmpeg succeeded AND wrote exactly the frames
@@ -245,10 +247,10 @@ async def _worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg
         await browser.close()
 
 
-def _worker_entry(task_queue, counter, lock, t0, timeline, total_frames, bg_dur, chunk_frames):
+def _worker_entry(task_queue, counter, lock, t0, timeline, total_frames, bg_dur, chunk_frames, completed_frames=0):
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    asyncio.run(_worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg_dur, chunk_frames))
+    asyncio.run(_worker_loop(task_queue, counter, lock, t0, timeline, total_frames, bg_dur, chunk_frames, completed_frames))
 
 
 def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_workers=None):
@@ -324,7 +326,7 @@ def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_worke
           f"{total_frames} frames, {total_chunks} chunks x {chunk_frames}f, {num_workers} workers")
 
     t0 = time.time()
-    counter, lock = Value("i", completed_frames), Lock()
+    counter, lock = Value("i", 0), Lock()
     task_queue = Queue()
     for i in bad_chunks:
         task_queue.put(i)
@@ -333,7 +335,7 @@ def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_worke
     # Only spawn workers if there are chunks to render
     for _ in range(min(num_workers, len(bad_chunks))):
         p = Process(target=_worker_entry,
-                    args=(task_queue, counter, lock, t0, timeline, total_frames, bg_dur, chunk_frames))
+                    args=(task_queue, counter, lock, t0, timeline, total_frames, bg_dur, chunk_frames, completed_frames))
         p.start()
         procs.append(p)
     for p in procs:
