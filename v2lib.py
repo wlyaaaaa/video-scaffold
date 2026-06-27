@@ -482,7 +482,10 @@ def holo_panel(title, items, x=M, y=560, w=2400, cue=None, delay=0.4,
 def morph_path(from_d, to_d, x=CX, y=CY, cue=None, delay=0.4, dur=1.2,
                stroke=None, sw=10, fill="none", close=False, samples=120):
     """② 矢量路径顺滑形变：from_d 流体般扭曲重组成 to_d（节点数可不同，运行时按
-    弧长重采样插值，无需 GSAP MorphSVG）。两段 d 写在同一 translate(x,y) 局部坐标里。"""
+    弧长重采样插值，无需 GSAP MorphSVG）。两段 d 写在同一 translate(x,y) 局部坐标里。
+    ⚠️ 形变的路径要用**单段子路径**（一个 M，其余 L/A/C…）；多子路径(多个 M)重采样后会
+    被连成一条线、出现跨接直线——多部件图形请把"会动的那部分"单独 morph、其余静态画
+    （参考 lock_unlock：锁体静止、只 morph 锁梁）。"""
     stroke = stroke or ACCENT
     tid = "morphT%d" % (abs(hash((from_d, to_d, x, y))) % 100000)
     closeattr = ' data-close="1"' if close else ''
