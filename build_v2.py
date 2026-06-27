@@ -333,9 +333,9 @@ def s17_report():
     ]
     return (
         L.kicker("亲测成绩单 · 2026/06/27", M, 320, delay=0.2)
-        + L.text("成本", M-480, 560, lvl=3, cue="成本", delay=0.1)
-        + L.num(527.70, M-220, 560, lvl=1, cue="成本", delay=0.15, dur=1.0, prefix="¥", dec=2, fill=GOLD)
-        + L.text("= 130 个热潮箱", M+480, 560, lvl=3, cue="一百三十", delay=0.0, anim="fade-left")
+        + L.text("成本", CX-480, 560, lvl=3, cue="成本", delay=0.1)
+        + L.num(527.70, CX-220, 560, lvl=1, cue="成本", delay=0.15, dur=1.0, prefix="¥", dec=2, fill=GOLD)
+        + L.text("= 130 个热潮箱", CX+480, 560, lvl=3, cue="一百三十", delay=0.0, anim="fade-left")
         + L.compare_table(["7天后市价", "扣税到手", "130箱总到手(日元)", "对比目标 16,200"], rows,
                           x=M, y=820, colw=[820, 560, 900, 920], row_h=200, delay=0.7, hi_col=2)
         + L.text("147 平仓 → 官方原价 ¥705.51", M, 1680, lvl=3, cue="原价", delay=0.0)
@@ -390,9 +390,11 @@ S20 = "最后提醒一个容易让钻[emphasis]白白蒸发的细节。钻分两
 
 def s21_cta():
     return (
-        L.text("活动限时 2500 钻 · 3800 日元", CX, 560, lvl=2, cue="活动", delay=0.3, anchor="middle", fill=GOLD)
+        f'<g data-anim="fade-out" {L._t("下期", 0.0, 0.4)}>'
+        + L.text("活动限时 2500 钻 · 3800 日元", CX, 560, lvl=2, cue="活动", delay=0.3, anchor="middle", fill=GOLD)
         + L.pop("只剩 39 天", CX, 720, lvl=1, cue="三十九", delay=0.0, fill=RED, anchor="middle")
         + L.text("这套操作 22 天够用——有充值计划，来得及", CX, 880, lvl=3, cue="来得及", delay=0.0, anchor="middle", fill=ACCENT)
+        + f'</g>'
         + L.end_card("我们下期见", "一键三连 + 关注 · 钻石分平台不互通", cue="下期", delay=1.6)
     )
 
