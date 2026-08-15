@@ -11,7 +11,7 @@ Universal (committed) parts:
     examples/       placeholder art for the demo
 
 Per-project workspace (generated, git-ignored, created on demand):
-    assets/        game art / images, named freely and referenced by scenes
+    assets/        source images, named freely and referenced by scenes
     scripts/       script_01.txt .. script_NN.txt  (one paragraph per scene)
     raw_audio/     audio_01.mp3 .. audio_NN.mp3     (TTS output)
     srt_data/      srt_01.json .. srt_NN.json       (whisper word timing)
@@ -23,6 +23,7 @@ Per-project workspace (generated, git-ignored, created on demand):
 import os
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_TITLE = os.environ.get("VIDEO_PROJECT_TITLE", "Untitled Video")
 
 
 def _p(*parts):
@@ -39,7 +40,7 @@ FPS = 60
 # The renderer loops it to cover any duration.
 BG_VIDEO = _p("background", "background_4k.mp4")
 
-# --- encode (RTX 5080 hardware AV1) -----------------------------------------
+# --- encode (NVIDIA NVENC AV1) ----------------------------------------------
 # Chunks ARE the final quality (concat is stream-copy), so invest here.
 # p6 + spatial/temporal AQ + lookahead = near-transparent 4K at a small size.
 VCODEC = "av1_nvenc"
@@ -47,7 +48,9 @@ CQ = "22"                 # constant quality; lower = better/bigger (18-24 sane)
 NVENC_EXTRA = ["-preset", "p6", "-tune", "hq", "-rc", "constqp",
                "-spatial-aq", "1", "-temporal-aq", "1", "-rc-lookahead", "32",
                "-pix_fmt", "yuv420p10le"]
-NUM_WORKERS = 4           # 4 keeps every av1_nvenc session within the GPU's
+NUM_WORKERS = int(os.environ.get("VIDEO_RENDER_WORKERS", "4"))
+                          # 4 is the verified conservative default; override
+                          # only after a local doctor/render acceptance.
                           # encode-session cap; 8 contended and silently dropped
                           # frames (the 3:47 desync). render.py now also verifies
                           # each chunk's frame count, so a drop fails loud, not silent.
@@ -79,8 +82,8 @@ GRAIN = 4                 # temporal film grain strength; 0 disables.
 
 # --- background music (YOU supply the file) ---------------------------------
 # Drop any audio at BGM_PATH; merge ducks it under the narration automatically.
-BGM_PATH = _p("bgm.mp3")  # v2: two tracks (bgm/BGM1+BGM2) loudnorm-matched & concatenated; mux loops => 交替
-BGM_VOLUME = 0.34         # base music level before ducking (raised per request; sidechain still keeps it under VO)
+BGM_PATH = _p("bgm.mp3")  # optional; merge loops it under narration
+BGM_VOLUME = 0.34         # base level before narration-driven sidechain ducking
 
 # --- Fish Audio TTS ---------------------------------------------------------
 # SECURITY: the key is read from env var FISH_API_KEY, or secret_local.py
@@ -93,8 +96,8 @@ except Exception:
     pass
 
 FISH_ENDPOINT = "https://api.fish.audio/v1/tts"
-# 央视配音 (CCTV male voice). The free model `s2.1-pro-free` accepts this
-# reference_id with NO API credit required - verified working.
+# 云飞旁白声线。Keep model + reference ID together as the single source of
+# truth; ``doctor-live`` verifies the configured route without touching a video.
 FISH_MODEL = "s2.1-pro-free"
 FISH_REFERENCE_ID = "3eee5ef4f6a94ce8adcaa8d4d86f7166"
 FISH_FORMAT = "mp3"
@@ -118,11 +121,12 @@ FISH_SFX_TAGS = ["laughing", "chuckling", "moaning", "clear throat", "sobbing",
 # --- faster-whisper (best local quality, max GPU/CPU utilisation) -----------
 WHISPER_MODEL = "large-v3"   # best accuracy
 WHISPER_DEVICE = "cuda"
-WHISPER_COMPUTE = "float16"  # 5080 has the VRAM; keeps quality high
+WHISPER_COMPUTE = "float16"  # modern NVIDIA GPUs keep quality high
 WHISPER_LANGUAGE = "zh"
-WHISPER_BATCH_SIZE = 16      # BatchedInferencePipeline throughput on the 5080
-WHISPER_CPU_THREADS = 16     # 9950X3D feeds the GPU (feature extraction / VAD)
-WHISPER_INITIAL_PROMPT = "游戏王MD, 官方绿卡, 网易BUFF, 倒余额, 初始号, 手机令牌, 改密码, 改绑邮箱, 有偿钻, 无偿钻, 区服, 钉死"
+WHISPER_BATCH_SIZE = 16
+WHISPER_CPU_THREADS = min(16, max(1, os.cpu_count() or 8))
+# Per-video hot words belong here. Keep the reusable scaffold topic-neutral.
+WHISPER_INITIAL_PROMPT = os.environ.get("WHISPER_INITIAL_PROMPT", "")
 
 # --- chapters (Bilibili) ----------------------------------------------------
 # Bilibili reads "MM:SS Title" / "HH:MM:SS Title" lines; first MUST be 00:00.

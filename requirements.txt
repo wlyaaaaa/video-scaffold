@@ -1,4 +1,6 @@
-# Python deps for the video scaffold. Also requires ffmpeg/ffprobe on PATH and
+# Python 3.11+ deps for the video scaffold. On Windows use run.ps1 so the
+# verified 3.11 runtime or a project .venv is selected deterministically.
+# Also requires ffmpeg/ffprobe on PATH and
 # a Chrome/Chromium for Playwright (`playwright install chromium`).
 playwright>=1.40
 faster-whisper>=1.0          # BatchedInferencePipeline support

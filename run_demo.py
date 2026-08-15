@@ -4,7 +4,7 @@ End-to-end DEMO of the scaffold (deliberately small) - now with frame-perfect
 narration sync via the Whisper word-timeline.
 
 Chain exercised:
-  TTS (央视 voice, free model) -> ffprobe durations -> faster-whisper word
+  TTS (云飞 voice, free model) -> ffprobe durations -> faster-whisper word
   timeline -> build scenes from the base board (data-cue resolved to exact word
   times) -> render onto the LOOPING 4K background -> mux audio -> final_output.mp4
 
@@ -67,21 +67,22 @@ def _ensure_demo_hero():
 
 
 def main():
+    config.PROJECT_TITLE = "SVG 动画演示"
     config.ensure_dirs()
     _ensure_demo_hero()
 
-    # stage 1: scripts -> TTS (央视 voice via free model)
+    # stage 1: scripts -> TTS (云飞 voice via free model)
     for i, text in enumerate(DEMO_SCRIPTS, 1):
         with open(os.path.join(config.DIR_SCRIPTS, f"script_{i:02d}.txt"), "w", encoding="utf-8") as f:
             f.write(text)
-    audios = fish_tts.synth_batch()  # uses config 央视 voice
+    audios = fish_tts.synth_batch(force=True)
     if len(audios) != len(DEMO_SCRIPTS):
         print("[demo] TTS did not produce all clips; aborting.")
         sys.exit(1)
 
     # stage 2: exact durations + word-level timeline
     durs = dur_mod.build()
-    transcribe.transcribe_batch()
+    transcribe.transcribe_batch(force=True)
 
     # stage 4a: build scenes, resolving data-cue against each scene's word timeline
     scenes = []
@@ -95,9 +96,10 @@ def main():
     final = merge.mux(video_track, audio)
 
     # stage 6: cover + Bilibili chapters + ready check
-    cover.build("极客配装", subtitle="RTX 5080 硬核攻略", kicker="HARDCORE GUIDE")
+    cover.build(config.PROJECT_TITLE, subtitle="Fish + Whisper 音画同步", kicker="WORKFLOW DEMO")
     chapters.write(chapters.from_scene_groups(durs, [(0, "传说级武器解禁"), (1, "核心数据解析")]))
-    cleanup.verify()
+    if not cleanup.verify():
+        sys.exit("[demo] delivery verification failed")
     print(f"\n[demo] DONE -> {final}")
 
 

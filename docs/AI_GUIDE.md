@@ -1,131 +1,85 @@
-# AI 开发指引 · 视频生成脚手架（单一入口）
+# AI 执行指引：通用视频工作流
 
-> **这是给 AI 编码助手的唯一必读文档。** 要改文案/排版/分镜/动效/音画同步，
-> **只读这一份就够了，不要再去通读 `build_v2.py` / `v2lib.py` / `pipeline/`**——
-> 那只会浪费上下文。需要更深的动效细节看 [`ADVANCED_FX.md`](ADVANCED_FX.md)，
-> 配音标记看 [`VOICE.md`](VOICE.md)。代码现状稳定、无已知 bug，别去"找 bug 式"通读。
+这份文档约束 AI 如何使用脚手架。除非用户明确授权开始某一期视频，否则只允许做
+环境体检、工作流测试和通用代码维护；不要自行确定选题、写文案、做分镜或生成演示内容。
 
-下一期大概率还是同风格（游戏王 MD · 回形针式数据讲解 · 无字幕）。流程完全复用。
+## 开工门槛
 
----
+1. 先运行 `pwsh -File .\run.ps1 doctor`。
+2. 需要验证 Fish 真实链路时运行 `doctor-live`；它只产生并删除一条临时探针音频。
+3. 确认 `config.py` 中的 Fish 模型/声线仍是唯一配置源，不复制 ID 到业务脚本。
+4. 只有用户明确给出本期目标后，才设置 `PROJECT_TITLE`、Whisper 热词和内容文件。
 
-## 0. 黄金法则（先记这几条）
+环境 Ready 与视频 Ready 必须分开报告。前者只表示依赖、Fish、SVG、GPU 和编码可用；
+后者必须等成片、封面、章节和最终 `verify` 全部通过。
 
-1. **只写一小段静态 SVG 片段**，时间轴动画交给底板运行时（`scene_base.html` 的 `seekTime(t)`）。
-2. **一切动效是 `t` 的纯函数**：底板**没有 rAF**，`render.py` 每帧 `seekTime(t)` 后抓图，
-   所以确定、同步、不掉帧。加新动效也必须守这条（随机量在 Python 端用固定种子预生成）。
-3. **能用组件就别手写**：`v2lib.py`（`import v2lib as L`）已封装全部排版/动效组件。
-4. **改完先 `build` 看 0 WARN，再 `preview` 肉眼验，最后才 `render`**。渲染是唯一耗时步骤。
-5. **配音齐全时别强制重配**：`tts`/`timing` 现已幂等，`all` 会自动跳过；要重配音才 `tts force`。
+## 文件职责
 
----
-
-## 1. 项目地图（文件职责）
-
-| 文件 | 职责 |
+| 路径 | 职责 |
 |---|---|
-| `config.py` | 全局静态配置（分辨率/FPS/线程/Whisper 热词/Fish 模型/BGM 音量）。 |
-| `build_v2.py` | **主业务**：场景数据 `SCENES`、章节 `CHAPTER_GROUPS`、每个 `sNN_*()` 场景的组件拼接、CLI 驱动。**改内容/排版在这里。** 现为干净 MD 骨架（4 个示例场景，照着改）。 |
-| `v2lib.py` (`as L`) | **组件库**：画布常量 + 全部排版/动效组件（含 8 个高级 FX）。 |
-| `templates/scene_base.html` | 动画底板 + 确定性运行时（`measure()`/`apply()`/`seekTime`）。所有 `data-anim` 原语在此。 |
-| `pipeline/` | 各阶段实现（tts/durations/transcribe/build_scene/render/merge/preview/chapters/cleanup）。**通常不用读。** |
-| `assets/` | 实拍截图/原画（换项目时整批替换；像素尺寸自动探测，无需手填）。 |
+| `config.py` | 画布、编码、Fish、Whisper、项目标题与路径的唯一配置源 |
+| `run.ps1` | Python 3.11 选择与统一命令入口 |
+| `pipeline/workflow.py` | 通用阶段编排与跨阶段编号/数量校验 |
+| `v2lib.py` / `pipeline/components.py` | 可复用 SVG 组件 |
+| `templates/scene_base.html` | `seekTime(t)` 确定性动画运行时 |
+| `scripts/` | 每场旁白，`script_NN.txt` |
+| `scene_html/fragment_NN.svg` | AI/人工审阅后的场景 SVG 源片段 |
+| `output/` | 预览、视频轨、最终成片、封面和章节 |
 
----
+`build_v2.py` 和 `templates/cover_md*.html` 是旧定制示例，不是当前入口，也不会复制到
+新项目。不要为了开始新视频去改它们。
 
-## 2. 设计系统常量（`v2lib.py` 定义，`build_v2.py` 直接用）
+## 标准阶段
 
-- **画布**：`WIDTH=3840 HEIGHT=2160`（4K UHD）。中心 `CX=1920 CY=1080`，左边距 `M=240`。
-- **调色盘语义**：`INK=#0C2B1B` 墨绿正文 / `ACCENT=#1F7A4D` 浅绿(好·结论·线/箭头) /
-  `RED=#C0392B` 代价·警示 / `GOLD=#B8862F` 钱。
-- **6 级字号** `T[lvl][0]`：`0`=220 巨幕 / `1`=150 标题 / `2`=100 重点 / `3`=64 正文 /
-  `4`=44 次要 / `5`=32 最小。
-- **前景设计契约**：背景透明、墨绿文字、强调线浅绿；**默认禁边框/卡片/阴影/毛玻璃**、留白克制。
-  （例外：`ADVANCED_FX.md` 的"全息/科技"风组件是 opt-in，允许半透明框+辉光；封面也允许重视觉。）
+```text
+doctor / doctor-live
+  ↓
+scripts → tts → timing → prompts
+                         ↓ 人或 AI 审阅并写 fragment_NN.svg
+                      build → lint → preview（人工观看）
+                                         ↓
+                              render → merge
+                              cover + chapters
+                                         ↓
+                                      verify
+```
 
----
+对应命令统一为 `pwsh -File .\run.ps1 <stage>`。
 
-## 3. 音画同步 & Cue 纠偏（关键）
+- `tts` 和 `timing` 默认复用已有非空结果。只有用户明确要变更旁白/重跑识别时使用
+  `--force`；重配音后必须重跑 timing、build、preview 和后续阶段。
+- `prompts` 只组装提示词，不自动调用外部模型。当前 Codex/AI 直接生成并审阅 SVG 是
+  正常路径，`pipeline.author.generate()` 保持未绑定不构成 blocker。
+- `build` 要求 scripts、fragments、word timelines 编号完全一致。任何 cue 未命中都会
+  生成可审计标记并使阶段失败。
+- `lint` 的 HARD 项必须修复。soft 项可结合全出血图片的设计意图人工判断。
+- `preview` 必须人工观看；自动检查不能替代动画节奏、信息层级和审美验收。
+- `render` 是耗时阶段，只能在 build、lint、preview 已完成后启动。
+- `verify` 是交付门。不得用“已渲染”“文件存在”或一次截图冒充最终 Ready。
 
-`cue="关键词"` = 该组件在旁白**念到这个词的那一帧**才开始动。原理：运行时拿 `cue` 去
-`srt_data/srt_NN.json`（Whisper 词级时间轴）查开始秒，重写成 `data-delay`。
+## 场景编写规则
 
-**两步法消除 `WARN cue not found`（成片应做到 0 WARN）：**
-1. **热词引导（首选）**：把专业词加进 `config.WHISPER_INITIAL_PROMPT`，重跑 `timing force`，纠正 90%+ 同音错字。
-2. **对齐 Whisper 实输出（兜底）**：仍错就把 `cue` 改成 Whisper 实际转写的字（**只动 cue，不动屏幕文本/配音**）。去 `srt_data/srt_NN.json` 看实际词。
+- 每场只输出 `<svg id="stage">` 内部片段，不含外层 `<svg>`、HTML、CSS 或脚本。
+- 外层 `<g transform>` 负责定位；带 `data-anim` 的内层节点不要再带 transform。
+- 优先使用 `data-cue="旁白真词"`，并附合理 `data-delay` 作为视觉兜底。
+- cue 只能引用真实发音，不可引用只显示在屏幕上的数字或标题。
+- 专业词先写入本期 `WHISPER_INITIAL_PROMPT` 后重跑 timing；仍不匹配时根据
+  `srt_data/srt_NN.json` 修正 cue，不改正确的屏幕文案。
+- 素材 URI 使用 `prompt_NN.txt` 注入的真实绝对 `file:` URI，不拼写虚构路径。
+- 新动画必须是时间 `t` 的纯函数。随机数在 Python 端用固定种子生成。
 
-常见纠偏：`有偿/无偿→有长/无长`，`免费钻→免费赚`，`代充→代冲`，`正题→阵题`，`盗刷→倒刷`，`某鱼→某于`。
+## 交付前检查
 
-**注意**：只能 cue 旁白**真说出来**的词，不能 cue 纯屏幕数字（"9.5"念"九点五"，cue 它前面的词）。
-中文数字会自动归一成阿拉伯（"三十六"↔"36" 都能命中）。标题只 cue 开头一两秒说到的词，别 cue 靠后的词（会迟出被正文抢跑）。
+1. `build` 无未解析 cue。
+2. `lint` 无 HARD 错误。
+3. 人工打开 `output/preview.html`，逐场确认布局、节奏和素材。
+4. `render` 与 `merge` 成功且没有缺帧/短分片。
+5. `cover` 与 `chapters` 已按本期内容人工审阅。
+6. `verify` 输出 `[verify] READY`。
+7. 真实观看最终 MP4 后，才能报告“视频可投稿”。
 
----
+## 安全边界
 
-## 4. `v2lib` 组件 API（`import v2lib as L`）
-
-所有函数都支持 `cue=`（踩点）和 `delay=`（兜底秒）。
-
-**基础原子**：`text / type_in / num(滚动数字,可 comma 千分位) / pop(弹出) / kicker / title /
-rule(分割线) / chip(药丸) / strike(删除线) / sweep(荧光扫) / arrow / hl_box(高亮框) / callout`。
-
-**结构化设备**：
-- `image(name,x,y,w/h,anim="wipe",cue)` 插 `assets/` 图（**尺寸自动探测**）；`push_image(...)` 缓推镜；`hero_feather(...)` 羽化融进背景的原画。
-- `compare_table(headers,rows,colw,hi_col)` 对比表（可高亮"我们"列）。
-- `bar_race(rows)` 条形竞赛；`ledger(title,items,total)` 账本逐行；`checklist(title,items)` 勾选清单。
-- `flow_token(nodes)` 流程链+金币行驶；`timeline_scrub(nodes)` 时间轴扫播；`balance(...)` 天平。
-- `stamp(s)` 大图章；`end_card(main,sub)` 封底。
-
-**高级 FX（详见 [`ADVANCED_FX.md`](ADVANCED_FX.md)）**：
-- `holo_panel(title,items)` / `holo(inner)` —— ① 3D 全息数据看板
-- `morph_path(from_d,to_d)` / `lock_unlock()` —— ② 矢量路径形变
-- `gooey_flow(pts)` —— ③ 资金流向流体融合
-- `num_burst(val,...)` / `particle_burst()` / `coin_fountain()` —— ④ 粒子炸裂/金币喷泉
-- `convert(a,"RMB",b,"日元")` 币种换算 · `discount_seal("74.8折")` 折扣印章+冲击波 ·
-  `pulse_badge("当前最优")` 脉冲徽章 · `card_flip(inner)` 卡牌翻转 · `ambient_motes()` 氛围浮尘 ·
-  `gauge(82,zones=[...])` 风险/力度/收益半圆仪表盘
-
----
-
-## 5. CLI（`python build_v2.py <stage>`）
-
-| 阶段 | 作用 |
-|---|---|
-| `doctor` | 渲染前体检：ffmpeg/ffprobe/背景/Fish key/playwright/assets 就绪？（**长渲染前先跑**） |
-| `scripts` | 把 `SCENES` 的旁白写成 `scripts/script_NN.txt` |
-| `tts` | 旁白→Fish 配音（**幂等**：配音齐全自动跳过；`tts force` 强制重配） |
-| `timing` | ffprobe 时长 + Whisper 词级转写（`all` 里 srt 齐全则跳过；`timing force` 强转） |
-| `build` | 片段嵌底板 → `scene_html/`（**改了文案/分镜先跑这个，盯 0 WARN**） |
-| `lint` | **越界自检**：自动找离开画布的文字(HARD,必修)/离开毛玻璃的元素(soft,看情况)。渲染前先跑，省得 90min 后才发现文字被切 |
-| `preview` | 生成 `output/preview.html`，浏览器逐场景**动态**自检（渲染前必看） |
-| `cover` | 渲染封面（`COVERS`；`cover_base.html` 占位符 `@@TITLE@@`/`@@SUBTITLE@@`/`@@KICKER@@`/`@@HERO@@`，值是图片路径→嵌图，否则当文字） |
-| `chapters` | 生成 `output/chapters.txt`（直接粘）+ `章节管理.txt`（含时间↔旁白摘要）。**自动校验少/短/间距**，违反就 WARN |
-| `publish` | 生成 `output/publish.txt`（投稿模版：标题/简介+章节/标签/自检清单）。AI 先填 `VIDEO_TITLE`/`VIDEO_DESC`/`TAGS` |
-| `render` | 逐帧抓取叠背景 → `video_track.mp4`，**自动接 merge** 出带声音成片（4 worker + 帧校验，约 80–90min） |
-| `merge` | 配音拼接 + BGM 侧链闪避 → `output/final_output.mp4` |
-| `verify` | 核对成片/封面已生成且非空 |
-| `cleanup` | 清临时分片/中间产物 |
-| `ship` | verify 通过则 cleanup，一键收尾 |
-| `reset` | 清空可再生工作区为下期腾位（`reset yes` 确认；保留 assets/ 与代码） |
-| `all` | 端到端（已幂等，可安全重跑） |
-
-日常迭代回路：**改 `build_v2.py` → `build`（0 WARN）→ `preview`（肉眼）→ 满意 `render`**。
-
----
-
-## 6. 开下一期视频的清单（当前已是干净起步状态）
-
-> 第一期已发布并归档到 **`E:\video-archive\md-krijin-v1\`**（完整 build_v2_v1.py、文案/数据 md、
-> 实拍图、配音、成片都在那；要抄分镜/数据口径去那翻，**别拉进当前会话浪费 token**）。
-> `build_v2.py` 现在是**干净的 MD 骨架**（4 个不依赖素材的示例场景），workspace 已清空。
-
-1. 改 `build_v2.py` 顶部 `TITLE`，把新素材丢进 `assets/`（尺寸自动探测，不用填 `DIMS`；要 EXIF 校正可在 `v2lib.DIMS` 覆盖）。
-2. 重写 `SCENES`：每个场景写旁白 + 用 `L.*` 组件拼前景（多用高级 FX：`holo_panel`/`gauge`/`convert`/
-   `num_burst`/`morph_path`…），`cue="旁白真词"` 踩点；同步改 `CHAPTER_GROUPS`、`COVERS`（封面模板）。
-   按需更新 `config.WHISPER_INITIAL_PROMPT` 热词。
-3. `doctor` → `build` → `lint`（0 HARD）→ `preview`（肉眼）。满意再继续。
-4. `all`（首跑合成配音+转写；幂等，可重跑）。或分步 `tts`→`timing`→`render`。
-5. 章节：**读每段旁白精炼**成 `CHAPTER_GROUPS`——**尽量少（6-9 章）、尽量短（4-6 字，是词不是句）**，
-   时间由 durations 自动对齐。`章节管理.txt` 里有"时间↔旁白摘要"帮你拟；`chapters` 会自动 WARN 太长/太密/太多。
-6. 出片：`verify` → `publish`（填好 `VIDEO_TITLE`/`VIDEO_DESC`/`TAGS` 后生成投稿模版）→ `ship`。把 `chapters`/`publish` 复制到 B 站。
-7. 收尾：把这一期的 per-project 文件归档出 `E:\video`（仿照 v1：移到 `E:\video-archive\<本期>\`，
-   再 `reset yes`），更新 `video-scaffold-backup.zip`（`git archive HEAD`）并 push GitHub。
+- Fish 密钥仅通过环境变量或被忽略的 `secret_local.py` 注入。
+- 不输出密钥，不把临时音频、素材、成片或缓存加入 Git。
+- 不擅自调用投稿、上传或其他外部发布能力。

@@ -397,7 +397,7 @@ def main():
             print(f"[v2] tts: {len(SCENES)} clips already in raw_audio/ - skipping "
                   f"(pass 'force' to re-synthesize the voice).")
         else:
-            outs = fish_tts.synth_batch()
+            outs = fish_tts.synth_batch(force=force)
             if len(outs) != len(SCENES):
                 sys.exit(f"[v2] TTS produced {len(outs)}/{len(SCENES)}")
     if stage in ("timing", "all"):
@@ -405,7 +405,7 @@ def main():
         if stage == "all" and _count(config.DIR_SRT, "srt_*.json") >= len(SCENES) and not force:
             print(f"[v2] timing: {len(SCENES)} srt present - skipping whisper (pass 'force' to redo).")
         else:
-            transcribe.transcribe_batch()
+            transcribe.transcribe_batch(force=force)
     scenes = build_all() if stage in ("build", "all") else sorted(glob.glob(os.path.join(config.DIR_SCENE, "scene_*.html")))
     if stage in ("lint", "all"):        # catch off-canvas text BEFORE the long render
         durs = _durs() if os.path.exists(config.DURATIONS_JSON) else [6.0] * len(scenes)

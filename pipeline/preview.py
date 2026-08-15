@@ -21,6 +21,7 @@ import sys
 import json
 import glob
 import subprocess
+import html as html_lib
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -72,8 +73,9 @@ def build(names=None, out=PREVIEW_HTML):
     bg_css = (f"background:#10231a url('{os.path.basename(PREVIEW_BG)}') center/cover no-repeat;"
               if has_bg else "background:#eef5f0;")
 
+    project_title = html_lib.escape(str(config.PROJECT_TITLE))
     html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">
-<title>预览 · {len(scenes)} 场景 · {_fmt(total)}</title>
+<title>{project_title} · 预览 · {len(scenes)} 场景 · {_fmt(total)}</title>
 <style>
   :root{{--w:600px;}}
   *{{box-sizing:border-box;}}
@@ -98,7 +100,7 @@ def build(names=None, out=PREVIEW_HTML):
   figcaption span{{color:#7fae97;font-size:12.5px;white-space:nowrap;}}
 </style></head><body>
 <header>
-  <h1>游戏王MD氪金指南 · 全场景动态预览</h1>
+  <h1>{project_title} · 全场景动态预览</h1>
   <p>{len(scenes)} 个场景 · 全片 {_fmt(total)} · 每格循环播放（无声、无转场），仅供渲染前自检布局/动画/音画cue。</p>
   <label>缩放 <input id="z" type="range" min="360" max="900" value="600"></label>
   <label><input id="play" type="checkbox" checked> 播放</label>

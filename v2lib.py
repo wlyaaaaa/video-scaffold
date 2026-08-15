@@ -81,17 +81,9 @@ def img_dims(name):
         pass
     raise KeyError(f"unknown image dims for {name!r}; add it to v2lib.DIMS")
 
-# real pixel sizes (EXIF-corrected)
-DIMS = {
- "1249日元某宝截图.jpg":(1440,844), "Google大师决斗-1美刀优惠券.jpg":(1440,461),
- "steam手机确认和小号交易.jpg":(1440,3200), "五大适合出售的箱子.jpg":(1440,2195),
- "和小号交易请求.png":(1623,1922), "官方常住10000日元=4950.png":(797,1175),
- "小号同意交易礼物.png":(1647,1165), "小号的“交易 URL.png":(1854,1739),
- "无痕窗口.png":(602,244), "日语区官方价格.png":(3840,2023), "消费价格.jpg":(1440,2280),
- "热潮武器箱出售6.18.png":(1792,1194), "网易buff一键设置steam账号管理界面.jpg":(1440,3200),
- "网易buff热潮武器箱200库存4.07.jpg":(1440,3200), "美区价格 (2).jpg":(3200,1440),
- "美区价格.jpg":(1440,1754), "购买成功.jpg":(1440,3200),
-}
+# Optional per-project EXIF/special-format overrides. Normal PNG/JPEG assets are
+# probed automatically; keep the reusable scaffold topic-neutral.
+DIMS = {}
 
 # ---- timing helper: cue first, data-delay fallback ------------------------
 def _t(cue, delay, dur=None):
@@ -549,11 +541,10 @@ def num_burst(value, x, y, lvl=0, cue=None, delay=0.1, dur=1.0, prefix="", suffi
     return number + burst
 
 
-# ---- MD-genre advanced devices (币种/折扣/卡牌/锁/金币/氛围) -------------------
+# ---- advanced devices (币种/折扣/卡片/锁/粒子/氛围) ---------------------------
 def convert(a_val, a_unit, b_val, b_unit, x=M, y=1000, cue=None, delay=0.3,
             factor="÷0.04207", lvl=1, a_fill=None, b_fill=None, comma=True):
-    """币种换算条：左值(人民币¥) —[factor]→ 右值(日元¥)，两个数字滚动 + 中间换算箭头。
-    专治本系列"币种铁律"——截图标人民币、旁白讲日元，观众要看得见换算。"""
+    """币种/单位换算条：左值 —[factor]→ 右值，两个数字滚动 + 中间换算箭头。"""
     a_fill = a_fill or INK; b_fill = b_fill or GOLD
     aw = 760; gap = 560
     return (
@@ -592,15 +583,13 @@ def pulse_badge(s, x=CX, y=CY, cue=None, delay=0.4, lvl=2, fill=None, glow=None)
 
 
 def card_flip(inner_svg, x=CX, y=CY, cue=None, delay=0.4, dur=0.9, ry0=-105):
-    """游戏王卡牌翻转揭示：inner_svg 像一张卡从立边翻到正面（本系列主题契合）。
-    inner_svg 用以(x,y)为原点的局部坐标书写。"""
+    """卡片翻转揭示：inner_svg 从立边翻到正面，以(x,y)为局部原点。"""
     return (f'<g transform="translate({x},{y})">'
             f'<g data-anim="flip" data-ry0="{ry0}" {_t(cue,delay,dur)}>{inner_svg}</g></g>')
 
 
 def coin_fountain(x=CX, y=1500, cue=None, delay=0.0, n=70, token="¥"):
-    """金币喷泉：偏上抛、慢重力的金色"硬币"喷出（充值/到账/收益的金钱感）。
-    复用确定性 burst 引擎，只是调参更"币"。"""
+    """金色令牌喷泉：偏上抛、慢重力，复用确定性 burst 引擎。"""
     return particle_burst(x, y, cue=cue, delay=delay, n=n, colors=[GOLD, "#E8C46A", "#F2D98A"],
                           rmin=14, rmax=30, vmin=700, vmax=1700, life=1.6, g=1100, up_bias=0.62,
                           seed=int(x) * 131 + int(y) * 17 + len(token))   # stable, no str-hash
@@ -612,8 +601,7 @@ def coin_fountain(x=CX, y=1500, cue=None, delay=0.0, n=70, token="¥"):
 _SHACKLE_SHUT = "M-46,-6 L-46,-58 A46,46 0 0 1 46,-58 L46,-6"
 _SHACKLE_OPEN = "M-46,-6 L-46,-58 A46,46 0 0 1 46,-58 L46,-92"
 def lock_unlock(x=CX, y=CY, cue=None, delay=0.4, dur=1.0, color=None):
-    """令牌/市场解锁：锁梁顺滑morph成开锁（15天解锁市场、绑令牌→可交易）。锁体静止、
-    只有锁梁右脚抬起 = 解锁。"""
+    """解锁图示：锁梁顺滑 morph 成开锁；锁体静止，只有锁梁右脚抬起。"""
     color = color or ACCENT
     body = (f'<rect data-anim="pop" {_t(cue,delay,0.5)} x="-70" y="-6" width="140" height="120" rx="20" '
             f'fill="none" stroke="{color}" stroke-width="12"/>')

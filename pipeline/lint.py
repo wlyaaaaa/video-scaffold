@@ -81,8 +81,11 @@ async def _run(scenes, durs, names):
 
 
 def lint(scene_paths, durations, names=None):
-    """Report off-canvas (HARD) and off-glass (soft) elements. Never raises; the
-    renderer can still run. Returns the HARD count so a caller can gate if it wants."""
+    """Report off-canvas (HARD) and off-glass (soft) elements.
+
+    A browser/runtime failure raises: skipping the check must never look like a
+    clean layout to the generic workflow. Returns the HARD finding count.
+    """
     if not scene_paths:
         print("[lint] no scenes built yet"); return 0
     if sys.platform == "win32":
@@ -90,7 +93,7 @@ def lint(scene_paths, durations, names=None):
     try:
         findings = asyncio.run(_run(scene_paths, durations, names))
     except Exception as e:
-        print(f"[lint] skipped (playwright error: {e})"); return 0
+        raise RuntimeError(f"layout lint could not run: {e}") from e
 
     hard = [f for f in findings if f[1] == "HARD"]
     soft = [f for f in findings if f[1] == "soft"]

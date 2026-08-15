@@ -8,7 +8,7 @@ is LOOPED (stream_loop -1 + modulo seek) so it covers any total duration - this
 is the fix for "set 15 min, only 1 min of background" where the 60 s clip used
 to run out and leave blank frames.
 
-Architecture (proven on 9950X3D x RTX 5080):
+Architecture (verified on a modern multi-core CPU + NVIDIA RTX GPU):
   * a fixed pool of headless Chromium workers, each keeps its pages warm;
   * the global frame range is sliced into CHUNK_FRAMES tasks on a queue;
   * each task pipes PNG frames into one ffmpeg (av1_nvenc) overlay process;

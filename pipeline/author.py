@@ -16,6 +16,7 @@ import os
 import sys
 import json
 import glob
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -38,12 +39,22 @@ ANIMATION_GUIDE = """可用动画（data-anim + data-delay/data-dur 秒）：
 def _transcript(srt_path):
     if not os.path.exists(srt_path):
         return ""
-    words = json.load(open(srt_path, encoding="utf-8"))
+    with open(srt_path, encoding="utf-8") as source:
+        words = json.load(source)
     return "".join(w["word"] for w in words)
 
 
-def build_prompt(script_text, srt_path, asset_name):
+def build_prompt(script_text, srt_path, asset_path=None):
     transcript = _transcript(srt_path)
+    if asset_path:
+        asset = Path(asset_path)
+        if not asset.is_absolute():
+            asset = Path(config.DIR_ASSETS) / asset
+        asset_uri = asset.resolve().as_uri()
+        asset_guide = f"""【本场景可用素材】{asset_uri}
+（用 <image href=\"{asset_uri}\"> 引入，建议配 data-anim=\"float\"）"""
+    else:
+        asset_guide = "【本场景可用素材】无（不要虚构素材路径）"
     return f"""你是顶级动态信息图设计师。请为下面这一段旁白设计「一个场景」的前景 SVG 片段。
 
 【旁白文案】
@@ -52,8 +63,7 @@ def build_prompt(script_text, srt_path, asset_name):
 【旁白词级时间轴可 cue 的词】（用于 data-cue 精确对齐）
 {transcript or "（无，回退到 data-delay 估时）"}
 
-【本场景可用素材】assets/{asset_name}
-（用 <image href="file:///绝对路径/{asset_name}"> 引入，建议配 data-anim="float"）
+{asset_guide}
 
 {DESIGN_RULES}
 {ANIMATION_GUIDE}
@@ -64,15 +74,16 @@ def build_prompt(script_text, srt_path, asset_name):
 def assemble_all(scripts_dir=config.DIR_SCRIPTS, srt_dir=config.DIR_SRT,
                  assets=None, out_dir=config.DIR_SCENE):
     """Write scene_html/prompt_NN.txt for every script. Returns the prompt list."""
-    config.ensure_dirs()
+    os.makedirs(out_dir, exist_ok=True)
     scripts = sorted(glob.glob(os.path.join(scripts_dir, "script_*.txt")))
     assets = assets or sorted(glob.glob(os.path.join(config.DIR_ASSETS, "*.png")))
     prompts = []
     for i, script in enumerate(scripts, 1):
         idx = f"{i:02d}"
-        text = open(script, encoding="utf-8").read().strip()
+        with open(script, encoding="utf-8") as source:
+            text = source.read().strip()
         srt = os.path.join(srt_dir, f"srt_{idx}.json")
-        asset = os.path.basename(assets[(i - 1) % len(assets)]) if assets else "weapon_01.png"
+        asset = assets[(i - 1) % len(assets)] if assets else None
         prompt = build_prompt(text, srt, asset)
         with open(os.path.join(out_dir, f"prompt_{idx}.txt"), "w", encoding="utf-8") as f:
             f.write(prompt)

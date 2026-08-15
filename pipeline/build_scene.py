@@ -21,6 +21,7 @@ import os
 import re
 import sys
 import json
+import html
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -94,7 +95,13 @@ def _cue_variants(phrase):
 def resolve_cues(fragment, words):
     """Rewrite every data-cue="phrase" into data-delay="t" using the timeline."""
     if not words:
-        return re.sub(r'\s*data-cue="[^"]*"', "", fragment)
+        return re.sub(
+            r'\s*data-cue="([^"]*)"',
+            lambda match: (
+                f' data-cue-missing="{html.escape(match.group(1), quote=True)}"'
+            ),
+            fragment,
+        )
     full, times = _char_index(words)
 
     def repl(m):
@@ -103,7 +110,9 @@ def resolve_cues(fragment, words):
             if idx >= 0:
                 return f' data-delay="{times[idx]:.3f}"'
         print(f"[scene] WARN cue not found in narration: {m.group(1)!r}")
-        return ""  # drop cue; keep any existing data-delay
+        # Keep a machine-auditable marker. The runtime ignores this attribute,
+        # while a manually supplied data-delay remains a visual fallback.
+        return f' data-cue-missing="{html.escape(m.group(1), quote=True)}"'
 
     return re.sub(r'\s*data-cue="([^"]*)"', repl, fragment)
 

@@ -39,9 +39,9 @@ def _pad_tail(path, seconds=None):
 def synth_one(text, out_path, reference_id=config.FISH_REFERENCE_ID, model=config.FISH_MODEL):
     """Synthesize a single utterance. Returns True on success.
 
-    For the production 央视 voice pass model=FISH_MODEL + reference_id (needs
-    credit). For a free default-voice clip pass model=FISH_MODEL_FREE and
-    reference_id=None (the free model ignores custom references).
+    The checked-in configuration uses the verified free model together with
+    the 云飞 reference voice. ``doctor-live`` is the canonical compatibility
+    probe because service-side model behavior can change independently.
     """
     headers = {
         "Authorization": f"Bearer {config.FISH_API_KEY}",
@@ -63,9 +63,15 @@ def synth_one(text, out_path, reference_id=config.FISH_REFERENCE_ID, model=confi
 
 
 def synth_batch(scripts_dir=config.DIR_SCRIPTS, audio_dir=config.DIR_AUDIO,
-                reference_id=config.FISH_REFERENCE_ID, model=config.FISH_MODEL):
-    """Synthesize every script_NN.txt -> audio_NN.mp3 in order."""
-    config.ensure_dirs()
+                reference_id=config.FISH_REFERENCE_ID, model=config.FISH_MODEL,
+                force=False):
+    """Synthesize every script_NN.txt -> audio_NN.mp3 in order.
+
+    Accepted, non-empty clips are reused by default so a later workflow stage
+    cannot silently change narration timing. Pass ``force=True`` explicitly to
+    regenerate them.
+    """
+    os.makedirs(audio_dir, exist_ok=True)
     scripts = sorted(glob.glob(os.path.join(scripts_dir, "script_*.txt")))
     if not scripts:
         print(f"[fish] no scripts in {scripts_dir}")
@@ -77,6 +83,10 @@ def synth_batch(scripts_dir=config.DIR_SCRIPTS, audio_dir=config.DIR_AUDIO,
         with open(script, "r", encoding="utf-8") as f:
             text = f.read().strip()
         out_path = os.path.join(audio_dir, f"audio_{idx}.mp3")
+        if not force and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
+            print(f"[fish] reuse {os.path.basename(out_path)}")
+            outputs.append(out_path)
+            continue
         print(f"[fish] {os.path.basename(script)} -> {os.path.basename(out_path)} ({len(text)} chars)")
         if synth_one(text, out_path, reference_id=reference_id, model=model):
             outputs.append(out_path)

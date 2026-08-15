@@ -6,7 +6,7 @@ We don't burn subtitles. We use whisper purely to learn *when* each word is
 spoken, so a scene's animations can be cued to the narration. Output is
 srt_data/srt_NN.json: a list of {word, start, end} in seconds.
 
-Model large-v3 on CUDA float16 is the best quality/speed point on the 5080.
+Model large-v3 on CUDA float16 is the verified quality/speed path.
 """
 
 import os
@@ -50,7 +50,7 @@ _pipe = None       # BatchedInferencePipeline (max GPU throughput) if available
 
 
 def _get_engine():
-    """Load large-v3 once, prefer the batched pipeline for 5080 throughput."""
+    """Load large-v3 once and prefer the batched CUDA pipeline."""
     global _model, _pipe
     if _model is None:
         from faster_whisper import WhisperModel
@@ -69,7 +69,7 @@ def _get_engine():
 
 def transcribe_one(audio_path, out_path):
     model, pipe = _get_engine()
-    # VAD trims silence; batching keeps the 5080 saturated on longer clips.
+    # VAD trims silence; batching keeps the GPU useful on longer clips.
     if pipe is not None:
         segments, _ = pipe.transcribe(audio_path, language=config.WHISPER_LANGUAGE,
                                       word_timestamps=True, vad_filter=True,
@@ -89,11 +89,15 @@ def transcribe_one(audio_path, out_path):
     return words
 
 
-def transcribe_batch(audio_dir=config.DIR_AUDIO, srt_dir=config.DIR_SRT):
-    config.ensure_dirs()
+def transcribe_batch(audio_dir=config.DIR_AUDIO, srt_dir=config.DIR_SRT, force=False):
+    os.makedirs(srt_dir, exist_ok=True)
     for audio in sorted(glob.glob(os.path.join(audio_dir, "audio_*.mp3"))):
         idx = os.path.splitext(os.path.basename(audio))[0].split("_")[-1]
-        transcribe_one(audio, os.path.join(srt_dir, f"srt_{idx}.json"))
+        out_path = os.path.join(srt_dir, f"srt_{idx}.json")
+        if not force and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
+            print(f"[whisper] reuse {os.path.basename(out_path)}")
+            continue
+        transcribe_one(audio, out_path)
 
 
 if __name__ == "__main__":

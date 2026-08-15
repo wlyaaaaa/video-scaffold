@@ -65,4 +65,4 @@ def build(title, subtitle="", kicker="", hero_path=None, out_png=COVER_PNG):
 
 
 if __name__ == "__main__":
-    build("极客配装", subtitle="RTX 5080 硬核攻略", kicker="HARDCORE GUIDE")
+    build(config.PROJECT_TITLE, subtitle="4K SVG 动画", kicker="VIDEO WORKFLOW")

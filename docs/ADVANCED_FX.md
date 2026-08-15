@@ -46,13 +46,13 @@ L.holo(inner_svg, cue="...", rx=18, ry=-14)                   # 把任意片段�
 ```
 
 ### 2) 矢量路径顺滑形变 —— `morph`
-「热潮武器箱」图标流体般扭曲重组成「日元硬币」。**自带按弧长重采样**，前后节点数
-可不同，**不需要 GSAP MorphSVG**。
+一个图标流体般扭曲重组成另一个图标。**自带按弧长重采样**，前后节点数可不同，
+**不需要 GSAP MorphSVG**。
 ```python
 box  = "M-120,-120 L120,-120 L120,120 L-120,120 Z"
 coin = "M0,-120 A120,120 0 1 1 0,120 A120,120 0 1 1 0,-120 Z"
 L.morph_path(box, coin, x=2900, y=560, cue="变现", close=True, stroke=L.GOLD)
-L.lock_unlock(x=3050, y=1700, cue="解锁")            # 现成：闭锁→开锁（绑令牌/解锁市场）
+L.lock_unlock(x=3050, y=1700, cue="解锁")            # 现成：闭锁→开锁
 ```
 
 ### 3) 资金流向·流体融合 —— `flow-blob`（goo 滤镜）
@@ -71,15 +71,15 @@ L.particle_burst(x, y, cue="到账", n=110)                                     
 L.coin_fountain(x=1920, y=1500, cue="收益")                                    # 金币喷泉（偏上抛慢重力）
 ```
 
-### 5)–8) 本系列（游戏王 MD）专属顺手动效
+### 5)–8) 通用信息图动效
 | 函数 | 效果 | 用在哪 |
 |---|---|---|
-| `L.convert(495.32,"RMB",11770,"日元", cue="换算")` | 币种换算条：左值→[÷0.04207]→右值，两数滚动 | **币种铁律**：截图标人民币、旁白讲日元 |
+| `L.convert(495.32,"RMB",11770,"JPY", cue="换算")` | 币种/单位换算条：左值→因子→右值，两数滚动 | 价格、比例或单位换算 |
 | `L.discount_seal("74.8折", cue="折")` | 折扣大印章砸下 + 冲击波环（`shockwave`） | 折扣/结论落锤 |
 | `L.pulse_badge("当前最优", cue="最优")` | 呼吸辉光徽章（`pulse`） | "亲测可行/最划算"标记 |
-| `L.card_flip(inner, cue="揭示")` | 游戏王卡牌翻转揭示（`flip`，3D rotateY） | 主题契合的揭示/反转 |
+| `L.card_flip(inner, cue="揭示")` | 卡片翻转揭示（`flip`，3D rotateY） | 揭示/反转 |
 | `L.ambient_motes(n=22)` | 背景缓慢游走光点（`drift`，种子相位） | 加高级氛围、不抢戏（默认右侧空域避开文字） |
-| `L.gauge(82, zones=[(0.4,ACCENT),(0.7,GOLD),(1.0,RED)], title="代充封号风险", unit="%")` | 半圆仪表盘，指针从 lo 扫到 value（复用 `tilt` 原语） | 代充封号风险 / 折扣力度 / 收益率 |
+| `L.gauge(82, zones=[(0.4,ACCENT),(0.7,GOLD),(1.0,RED)], title="风险指数", unit="%")` | 半圆仪表盘，指针从 lo 扫到 value（复用 `tilt` 原语） | 风险 / 力度 / 收益率 |
 
 ---
 
@@ -105,10 +105,11 @@ L.coin_fountain(x=1920, y=1500, cue="收益")                                   
 
 ## 工业化用法（一劳永逸）
 
-这套底层 SVG/CSS 模板写好后，**以后只改 Python 里传入的数据**就能成批吐出 AE 级视频：
-1. 在 `build_v2.py` 的某个 `sNN_*()` 场景函数里，把上面任意 `L.xxx(...)` 拼进 `return`。
-2. `python build_v2.py build` →（0 WARN）→ `python build_v2.py preview` 浏览器里秒验动效。
-3. 满意再 `python build_v2.py render`。
+这套底层 SVG/CSS 模板写好后，每期只需更换数据与场景片段：
+
+1. 用 `v2lib.py` 的 `L.xxx(...)` 组合出 `scene_html/fragment_NN.svg`。
+2. `pwsh -File .\run.ps1 build` → `lint` → `preview`，在浏览器中验动效。
+3. 人工确认后再运行 `pwsh -File .\run.ps1 render`。
 
 > 验证记录：8 个原语已用 Playwright 在确定性抓帧路径下逐帧截图确认渲染正常
 > （3D 全息 / 路径形变 / goo 流体 / 粒子炸裂 / 印章冲击波 / 卡牌翻转 / 脉冲 / 浮尘）。

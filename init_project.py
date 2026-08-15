@@ -16,9 +16,9 @@ import shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-UNIVERSAL = ["config.py", "run_demo.py", "init_project.py", "requirements.txt",
+UNIVERSAL = ["config.py", "run.ps1", "run_demo.py", "init_project.py", "requirements.txt",
              "README.md", ".gitignore", "pipeline", "templates", "docs",
-             "background", "examples"]
+             "background", "examples", "v2lib.py"]
 WORKSPACE = ["assets", "scripts", "raw_audio", "srt_data",
              "scene_html", "rendered", "output"]
 
@@ -36,7 +36,12 @@ def init(target):
             continue
         dst = os.path.join(target, item)
         if os.path.isdir(src):
-            shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
+            ignored = ["__pycache__"]
+            if item == "templates":
+                # Bespoke legacy covers stay in the source repository as examples;
+                # a fresh project receives only the universal boards.
+                ignored += ["cover_md.html", "cover_md_43.html"]
+            shutil.copytree(src, dst, ignore=shutil.ignore_patterns(*ignored))
         else:
             shutil.copy2(src, dst)
 
@@ -47,7 +52,7 @@ def init(target):
         f.write('# GIT-IGNORED. Put your key here.\nFISH_API_KEY = ""\n')
 
     print(f"[init] new project ready at {target}")
-    print("       next: set secret_local.py, drop art in assets/, run python run_demo.py")
+    print("       next: set secret_local.py, then run: pwsh -File .\\run.ps1 doctor-live")
 
 
 if __name__ == "__main__":
