@@ -7,6 +7,8 @@ import sys
 import tempfile
 import types
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest import mock
 
@@ -462,12 +464,20 @@ class GenericProjectTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary) / "fresh"
-            init_project.init(str(target))
+            output = StringIO()
+            with redirect_stdout(output):
+                init_project.init(str(target))
             self.assertTrue((target / "run.ps1").is_file())
             self.assertTrue((target / "v2lib.py").is_file())
+            self.assertTrue((target / "tests" / "test_workflow_readiness.py").is_file())
             self.assertFalse((target / "build_v2.py").exists())
             self.assertFalse((target / "templates" / "cover_md.html").exists())
             self.assertFalse((target / "templates" / "cover_md_43.html").exists())
+            next_steps = output.getvalue()
+            self.assertIn(r"next: run: pwsh -File .\run.ps1 test", next_steps)
+            self.assertIn(r"then: run: pwsh -File .\run.ps1 doctor", next_steps)
+            self.assertLess(next_steps.index("run.ps1 test"), next_steps.index("doctor-live"))
+            self.assertLess(next_steps.index("run.ps1 doctor"), next_steps.index("doctor-live"))
 
     def test_active_guides_have_no_retired_root_path(self) -> None:
         for relative in ("README.md", "docs/AI_GUIDE.md", "docs/AUTHORING.md"):

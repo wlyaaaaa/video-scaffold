@@ -5,9 +5,9 @@ Scaffold a fresh video project from this universal template.
     python init_project.py <target_dir>
 
 Copies the reusable parts (config, pipeline, templates, docs, background system,
-examples, runner) into <target_dir>, creates the empty per-project workspace
-folders, and drops a secret_local.py stub for the API key. The shared 4K
-background is copied so the new project renders out of the box.
+examples, tests, runner) into <target_dir>, creates the empty per-project
+workspace folders, and drops a secret_local.py stub for the API key. The shared
+4K background is copied so the new project renders out of the box.
 """
 
 import os
@@ -18,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 UNIVERSAL = ["config.py", "run.ps1", "run_demo.py", "init_project.py", "requirements.txt",
              "README.md", ".gitignore", "pipeline", "templates", "docs",
-             "background", "examples", "v2lib.py"]
+             "background", "examples", "tests", "v2lib.py"]
 WORKSPACE = ["assets", "scripts", "raw_audio", "srt_data",
              "scene_html", "rendered", "output"]
 
@@ -52,7 +52,9 @@ def init(target):
         f.write('# GIT-IGNORED. Put your key here.\nFISH_API_KEY = ""\n')
 
     print(f"[init] new project ready at {target}")
-    print("       next: set secret_local.py, then run: pwsh -File .\\run.ps1 doctor-live")
+    print("       next: run: pwsh -File .\\run.ps1 test")
+    print("       then: run: pwsh -File .\\run.ps1 doctor")
+    print("       optional later: set secret_local.py, then run: pwsh -File .\\run.ps1 doctor-live")
 
 
 if __name__ == "__main__":

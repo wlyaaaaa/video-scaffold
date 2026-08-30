@@ -72,11 +72,20 @@ FISH_API_KEY = "..."
 ```powershell
 py -3.11 .\init_project.py D:\Videos\my-next-video
 Set-Location D:\Videos\my-next-video
+pwsh -File .\run.ps1 test
+pwsh -File .\run.ps1 doctor
+```
+
+初始化会复制通用运行时、组件库、文档、背景、示例和回归测试，不复制旧项目的
+`build_v2.py` 或定制封面模板。先用 `test` 验证新项目自身完整，再用不发起网络请求的
+`doctor` 检查本机环境。只有后续需要验证真实 Fish 链路时，才设置
+`secret_local.py` 并运行：
+
+```powershell
 pwsh -File .\run.ps1 doctor-live
 ```
 
-初始化只复制通用运行时、组件库、文档、背景和示例，不复制旧项目的
-`build_v2.py` 或定制封面模板。它会创建这些空目录：
+初始化还会创建这些空目录：
 
 ```text
 assets/       素材
