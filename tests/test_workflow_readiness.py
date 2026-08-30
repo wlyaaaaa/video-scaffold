@@ -3,11 +3,18 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
 
+
+os.environ["FISH_API_KEY"] = "test-only-placeholder"
+_SECRET_STUB = types.ModuleType("secret_local")
+_SECRET_STUB.FISH_API_KEY = "test-only-placeholder"
+sys.modules["secret_local"] = _SECRET_STUB
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -131,6 +138,80 @@ class DeliveryVerificationTests(unittest.TestCase):
                 self.assertFalse(cleanup.verify())
 
 
+class IndexedFileContractTests(unittest.TestCase):
+    def test_indexed_files_accept_100_and_sort_numerically(self) -> None:
+        from pipeline.indexed_files import indexed_files
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "script_100.txt").write_text("100", encoding="utf-8")
+            (root / "script_99.txt").write_text("99", encoding="utf-8")
+
+            indexed = indexed_files(str(root / "script_*.txt"))
+
+            self.assertEqual([99, 100], list(indexed))
+            self.assertEqual(
+                ["script_99.txt", "script_100.txt"],
+                [Path(path).name for path in indexed.values()],
+            )
+
+    def test_indexed_files_reject_noncanonical_or_unicode_names(self) -> None:
+        from pipeline.indexed_files import indexed_files
+
+        names = (
+            "script_extra_03.txt",
+            "script_2.txt",
+            "script_001.txt",
+            "script_٠١.txt",
+            "script_00.txt",
+        )
+        for name in names:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / name).write_text("invalid", encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "indexed"):
+                    indexed_files(str(root / "script_*.txt"))
+
+    def test_indexed_files_reject_duplicate_indices(self) -> None:
+        from pipeline.indexed_files import indexed_files
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "script_01.txt"
+            path.write_text("one", encoding="utf-8")
+            with mock.patch(
+                "pipeline.indexed_files.glob.glob",
+                return_value=[str(path), str(path)],
+            ):
+                with self.assertRaisesRegex(RuntimeError, "duplicate script index 01"):
+                    indexed_files(str(path.parent / "script_*.txt"))
+
+    def test_author_preflights_all_names_before_overwriting_prompts(self) -> None:
+        from pipeline import author
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scripts = root / "scripts"
+            timelines = root / "srt_data"
+            prompts = root / "scene_html"
+            scripts.mkdir()
+            timelines.mkdir()
+            prompts.mkdir()
+            (scripts / "script_01.txt").write_text("valid", encoding="utf-8")
+            (scripts / "script_001.txt").write_text("collision", encoding="utf-8")
+            accepted = prompts / "prompt_01.txt"
+            accepted.write_text("accepted prompt", encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "non-canonical"):
+                author.assemble_all(
+                    str(scripts),
+                    str(timelines),
+                    assets=[],
+                    out_dir=str(prompts),
+                )
+
+            self.assertEqual("accepted prompt", accepted.read_text(encoding="utf-8"))
+
+
 class GenericProjectTests(unittest.TestCase):
     def test_author_prompt_uses_a_real_file_uri_for_assets(self) -> None:
         from pipeline.author import build_prompt
@@ -144,7 +225,7 @@ class GenericProjectTests(unittest.TestCase):
             self.assertIn(asset.resolve().as_uri(), prompt)
             self.assertNotIn("file:///绝对路径", prompt)
 
-    def test_author_preserves_sparse_scene_indices_and_timelines(self) -> None:
+    def test_author_maps_three_sparse_scenes_to_real_timelines_and_assets(self) -> None:
         from pipeline import author
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -155,35 +236,200 @@ class GenericProjectTests(unittest.TestCase):
             scripts.mkdir()
             timelines.mkdir()
             prompts.mkdir()
-            asset = root / "hero.png"
-            asset.write_bytes(b"png")
-            (scripts / "script_01.txt").write_text("第一场", encoding="utf-8")
-            (scripts / "script_03.txt").write_text("第三场", encoding="utf-8")
-            (timelines / "srt_01.json").write_text(
-                json.dumps([{"word": "第一场", "start": 0.0, "end": 1.0}]),
-                encoding="utf-8",
-            )
-            (timelines / "srt_03.json").write_text(
-                json.dumps([{"word": "第三场", "start": 0.0, "end": 1.0}]),
-                encoding="utf-8",
-            )
+            assets = [root / "asset-a.png", root / "asset-b.png"]
+            for asset in assets:
+                asset.write_bytes(b"png")
+            for index in (1, 3, 100):
+                suffix = f"{index:02d}"
+                (scripts / f"script_{suffix}.txt").write_text(
+                    f"SCRIPT_{suffix}",
+                    encoding="utf-8",
+                )
+                (timelines / f"srt_{suffix}.json").write_text(
+                    json.dumps(
+                        [{"word": f"TIMELINE_{suffix}", "start": 0.0, "end": 1.0}]
+                    ),
+                    encoding="utf-8",
+                )
 
             author.assemble_all(
                 str(scripts),
                 str(timelines),
-                assets=[str(asset)],
+                assets=[str(asset) for asset in assets],
                 out_dir=str(prompts),
             )
 
             self.assertEqual(
-                ["prompt_01.txt", "prompt_03.txt"],
+                ["prompt_01.txt", "prompt_03.txt", "prompt_100.txt"],
                 sorted(path.name for path in prompts.glob("prompt_*.txt")),
             )
-            self.assertIn(
-                "第三场",
-                (prompts / "prompt_03.txt").read_text(encoding="utf-8"),
-            )
+            for position, index in enumerate((1, 3, 100)):
+                suffix = f"{index:02d}"
+                prompt = (prompts / f"prompt_{suffix}.txt").read_text(encoding="utf-8")
+                self.assertIn(f"SCRIPT_{suffix}", prompt)
+                self.assertIn(f"TIMELINE_{suffix}", prompt)
+                self.assertIn(assets[position % 2].resolve().as_uri(), prompt)
             self.assertFalse((prompts / "prompt_02.txt").exists())
+
+    def test_author_removes_only_canonical_stale_prompts_on_rerun(self) -> None:
+        from pipeline import author
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scripts = root / "scripts"
+            timelines = root / "srt_data"
+            prompts = root / "scene_html"
+            scripts.mkdir()
+            timelines.mkdir()
+            prompts.mkdir()
+            asset = root / "asset.png"
+            asset.write_bytes(b"png")
+            for index in (1, 2, 3):
+                suffix = f"{index:02d}"
+                (scripts / f"script_{suffix}.txt").write_text(
+                    f"SCRIPT_{suffix}", encoding="utf-8"
+                )
+                (timelines / f"srt_{suffix}.json").write_text(
+                    json.dumps(
+                        [{"word": f"TIMELINE_{suffix}", "start": 0.0, "end": 1.0}]
+                    ),
+                    encoding="utf-8",
+                )
+            author.assemble_all(
+                str(scripts), str(timelines), assets=[str(asset)], out_dir=str(prompts)
+            )
+            noncanonical = prompts / "prompt_2.txt"
+            unrelated = prompts / "notes.txt"
+            noncanonical.write_text("keep noncanonical", encoding="utf-8")
+            unrelated.write_text("keep unrelated", encoding="utf-8")
+
+            (scripts / "script_02.txt").unlink()
+            (timelines / "srt_02.json").unlink()
+            author.assemble_all(
+                str(scripts), str(timelines), assets=[str(asset)], out_dir=str(prompts)
+            )
+
+            self.assertFalse((prompts / "prompt_02.txt").exists())
+            self.assertEqual("keep noncanonical", noncanonical.read_text(encoding="utf-8"))
+            self.assertEqual("keep unrelated", unrelated.read_text(encoding="utf-8"))
+
+    def test_numeric_order_is_shared_by_pipeline_consumers(self) -> None:
+        from pipeline import durations, fish_tts, merge, transcribe, workflow
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scripts = root / "scripts"
+            audio = root / "audio"
+            timelines = root / "timelines"
+            output = root / "output"
+            scripts.mkdir()
+            audio.mkdir()
+            timelines.mkdir()
+            output.mkdir()
+            for index in (100, 99):
+                (scripts / f"script_{index}.txt").write_text(
+                    f"SCRIPT_{index}", encoding="utf-8"
+                )
+                (audio / f"audio_{index}.mp3").write_bytes(str(index).encode("ascii"))
+
+            with mock.patch.object(fish_tts, "synth_one") as synth:
+                tts_outputs = fish_tts.synth_batch(str(scripts), str(audio))
+            synth.assert_not_called()
+            self.assertEqual(
+                ["audio_99.mp3", "audio_100.mp3"],
+                [Path(path).name for path in tts_outputs],
+            )
+
+            transcript_calls = []
+
+            def record_transcript(audio_path: str, out_path: str) -> None:
+                transcript_calls.append((Path(audio_path).name, Path(out_path).name))
+
+            with mock.patch.object(
+                transcribe,
+                "transcribe_one",
+                side_effect=record_transcript,
+            ):
+                transcribe.transcribe_batch(str(audio), str(timelines), force=True)
+            self.assertEqual(
+                [("audio_99.mp3", "srt_99.json"), ("audio_100.mp3", "srt_100.json")],
+                transcript_calls,
+            )
+
+            durations_path = root / "durations.json"
+            with mock.patch.object(
+                durations,
+                "probe_seconds",
+                side_effect=lambda path: float(Path(path).stem.split("_")[-1]),
+            ):
+                values = durations.build(str(audio), str(durations_path))
+            self.assertEqual([99.0, 100.0], values)
+
+            captured = {}
+
+            def capture_concat(command, check):
+                list_path = Path(command[command.index("-i") + 1])
+                captured["list"] = list_path.read_text(encoding="utf-8")
+                return mock.Mock(returncode=0)
+
+            with (
+                mock.patch.object(merge.config, "DIR_OUTPUT", str(output)),
+                mock.patch.object(merge.subprocess, "run", side_effect=capture_concat),
+            ):
+                merge.concat_audio(str(audio), str(output / "_main_audio.mp3"))
+            self.assertLess(
+                captured["list"].index("audio_99.mp3"),
+                captured["list"].index("audio_100.mp3"),
+            )
+            self.assertEqual(
+                [99, 100],
+                list(workflow._indexed(str(audio / "audio_*.mp3"))),
+            )
+
+    def test_preview_pairs_numeric_scene_order_with_durations(self) -> None:
+        from pipeline import preview
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scenes = root / "scene_html"
+            output = root / "output"
+            scenes.mkdir()
+            output.mkdir()
+            (scenes / "scene_100.html").write_text("100", encoding="utf-8")
+            (scenes / "scene_99.html").write_text("99", encoding="utf-8")
+            durations_path = root / "durations.json"
+            durations_path.write_text(json.dumps([99.0, 100.0]), encoding="utf-8")
+            out = output / "preview.html"
+            with (
+                mock.patch.object(preview.config, "DIR_SCENE", str(scenes)),
+                mock.patch.object(preview.config, "DIR_OUTPUT", str(output)),
+                mock.patch.object(preview.config, "DURATIONS_JSON", str(durations_path)),
+                mock.patch.object(preview.config, "PROJECT_TITLE", "Numeric Preview"),
+                mock.patch.object(preview, "PREVIEW_BG", str(output / "_preview_bg.jpg")),
+                mock.patch.object(preview, "_ensure_bg", return_value=None),
+            ):
+                preview.build(out=str(out))
+
+            html = out.read_text(encoding="utf-8")
+            scene_99 = 'scene_99.html?dur=99.000'
+            scene_100 = 'scene_100.html?dur=100.000'
+            self.assertIn(scene_99, html)
+            self.assertIn(scene_100, html)
+            self.assertLess(html.index(scene_99), html.index(scene_100))
+
+    def test_lint_direct_entry_uses_numeric_scene_order(self) -> None:
+        from pipeline import lint
+
+        with tempfile.TemporaryDirectory() as temporary:
+            scenes = Path(temporary)
+            (scenes / "scene_100.html").write_text("100", encoding="utf-8")
+            (scenes / "scene_99.html").write_text("99", encoding="utf-8")
+            with mock.patch.object(lint.config, "DIR_SCENE", str(scenes)):
+                paths = lint._default_scene_paths()
+            self.assertEqual(
+                ["scene_99.html", "scene_100.html"],
+                [Path(path).name for path in paths],
+            )
 
     def test_preview_uses_project_title_from_config(self) -> None:
         from pipeline import preview

@@ -10,30 +10,20 @@ script, or designs a scene on its own.
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import math
 import os
-import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from pipeline import author, build_scene, chapters, cleanup, cover, durations
 from pipeline import fish_tts, lint, merge, preview, render, transcribe
+from pipeline.indexed_files import indexed_files
 
 
 def _indexed(pattern: str) -> dict[int, str]:
-    indexed: dict[int, str] = {}
-    for path in sorted(glob.glob(pattern)):
-        match = re.search(r"_(\d+)\.[^.]+$", os.path.basename(path))
-        if not match:
-            continue
-        index = int(match.group(1))
-        if index in indexed:
-            raise RuntimeError(f"duplicate index {index:02d}: {indexed[index]} and {path}")
-        indexed[index] = path
-    return indexed
+    return indexed_files(pattern)
 
 
 def _require(label: str, indexed: dict[int, str]) -> dict[int, str]:

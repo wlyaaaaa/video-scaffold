@@ -19,12 +19,12 @@ Public entry:  build(names=None) -> output/preview.html
 import os
 import sys
 import json
-import glob
 import subprocess
 import html as html_lib
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.indexed_files import indexed_files
 
 PREVIEW_HTML = os.path.join(config.DIR_OUTPUT, "preview.html")
 PREVIEW_BG = os.path.join(config.DIR_OUTPUT, "_preview_bg.jpg")
@@ -50,21 +50,22 @@ def build(names=None, out=PREVIEW_HTML):
     _ensure_bg()
     with open(config.DURATIONS_JSON, "r", encoding="utf-8") as f:
         durs = json.load(f)
-    scenes = sorted(glob.glob(os.path.join(config.DIR_SCENE, "scene_*.html")))
-    if not scenes:
+    scene_map = indexed_files(os.path.join(config.DIR_SCENE, "scene_*.html"))
+    if not scene_map:
         print("[preview] no scenes built yet"); return None
+    scenes = list(scene_map.items())
     n = min(len(scenes), len(durs))
     total = sum(durs[:n])
     has_bg = os.path.exists(PREVIEW_BG)
 
     cards, acc = [], 0.0
-    for i in range(n):
-        rel = os.path.relpath(scenes[i], config.DIR_OUTPUT).replace("\\", "/")
+    for i, (index, scene) in enumerate(scenes[:n]):
+        rel = os.path.relpath(scene, config.DIR_OUTPUT).replace("\\", "/")
         d = durs[i]
-        nm = names[i] if names and i < len(names) else f"scene_{i+1:02d}"
+        nm = names[i] if names and i < len(names) else f"scene_{index:02d}"
         cards.append(f"""
       <figure class="card">
-        <div class="frame"><iframe loading="lazy" src="../scene_html/{os.path.basename(scenes[i])}?dur={d:.3f}"></iframe></div>
+        <div class="frame"><iframe loading="lazy" src="../scene_html/{os.path.basename(scene)}?dur={d:.3f}"></iframe></div>
         <figcaption><b>#{i+1:02d} · {nm}</b><span>起 {_fmt(acc)} · 时长 {d:.1f}s</span></figcaption>
       </figure>""")
         acc += d

@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.indexed_files import indexed_basename, indexed_files
 
 DESIGN_RULES = f"""设计契约（必须遵守）：
 - 画布 3840x2160，<svg id="stage"> 内只写静态 SVG 片段，不要写 <html>/<style>/<script>。
@@ -74,25 +75,33 @@ def build_prompt(script_text, srt_path, asset_path=None):
 def assemble_all(scripts_dir=config.DIR_SCRIPTS, srt_dir=config.DIR_SRT,
                  assets=None, out_dir=config.DIR_SCENE):
     """Write scene_html/prompt_NN.txt for every script. Returns the prompt list."""
-    os.makedirs(out_dir, exist_ok=True)
-    scripts = sorted(glob.glob(os.path.join(scripts_dir, "script_*.txt")))
+    scripts = indexed_files(os.path.join(scripts_dir, "script_*.txt"))
     assets = assets or sorted(glob.glob(os.path.join(config.DIR_ASSETS, "*.png")))
-    prompts = []
-    for position, script in enumerate(scripts):
-        suffix = Path(script).stem.rsplit("_", 1)[-1]
-        if not suffix.isdigit():
-            raise RuntimeError(f"invalid script filename: {os.path.basename(script)}")
-        idx = f"{int(suffix):02d}"
+    prepared = []
+    for position, (index, script) in enumerate(scripts.items()):
         with open(script, encoding="utf-8") as source:
             text = source.read().strip()
-        srt = os.path.join(srt_dir, f"srt_{idx}.json")
+        srt = os.path.join(srt_dir, indexed_basename("srt", index, ".json"))
         asset = assets[position % len(assets)] if assets else None
         prompt = build_prompt(text, srt, asset)
-        with open(os.path.join(out_dir, f"prompt_{idx}.txt"), "w", encoding="utf-8") as f:
+        output = os.path.join(out_dir, indexed_basename("prompt", index, ".txt"))
+        prepared.append((output, prompt))
+
+    expected = {os.path.basename(output) for output, _prompt in prepared}
+    existing = indexed_files(
+        os.path.join(out_dir, "prompt_*.txt"),
+        ignore_noncanonical=True,
+    )
+
+    os.makedirs(out_dir, exist_ok=True)
+    for path in existing.values():
+        if os.path.basename(path) not in expected:
+            os.remove(path)
+    for output, prompt in prepared:
+        with open(output, "w", encoding="utf-8") as f:
             f.write(prompt)
-        prompts.append(prompt)
-    print(f"[author] assembled {len(prompts)} scene prompts -> {out_dir}/prompt_NN.txt")
-    return prompts
+    print(f"[author] assembled {len(prepared)} scene prompts -> {out_dir}/prompt_NN.txt")
+    return [prompt for _output, prompt in prepared]
 
 
 def generate(prompt):

@@ -11,11 +11,11 @@ Model large-v3 on CUDA float16 is the verified quality/speed path.
 
 import os
 import sys
-import glob
 import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.indexed_files import indexed_basename, indexed_files
 
 
 def _register_cuda_dlls():
@@ -91,9 +91,12 @@ def transcribe_one(audio_path, out_path):
 
 def transcribe_batch(audio_dir=config.DIR_AUDIO, srt_dir=config.DIR_SRT, force=False):
     os.makedirs(srt_dir, exist_ok=True)
-    for audio in sorted(glob.glob(os.path.join(audio_dir, "audio_*.mp3"))):
-        idx = os.path.splitext(os.path.basename(audio))[0].split("_")[-1]
-        out_path = os.path.join(srt_dir, f"srt_{idx}.json")
+    audios = indexed_files(os.path.join(audio_dir, "audio_*.mp3"))
+    for index, audio in audios.items():
+        out_path = os.path.join(
+            srt_dir,
+            indexed_basename("srt", index, ".json"),
+        )
         if not force and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
             print(f"[whisper] reuse {os.path.basename(out_path)}")
             continue

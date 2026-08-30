@@ -14,12 +14,12 @@ API contract (see config.py):
 
 import os
 import sys
-import glob
 import subprocess
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.indexed_files import indexed_basename, indexed_files
 
 
 def _pad_tail(path, seconds=None):
@@ -72,17 +72,19 @@ def synth_batch(scripts_dir=config.DIR_SCRIPTS, audio_dir=config.DIR_AUDIO,
     regenerate them.
     """
     os.makedirs(audio_dir, exist_ok=True)
-    scripts = sorted(glob.glob(os.path.join(scripts_dir, "script_*.txt")))
+    scripts = indexed_files(os.path.join(scripts_dir, "script_*.txt"))
     if not scripts:
         print(f"[fish] no scripts in {scripts_dir}")
         return []
 
     outputs = []
-    for script in scripts:
-        idx = os.path.splitext(os.path.basename(script))[0].split("_")[-1]
+    for index, script in scripts.items():
         with open(script, "r", encoding="utf-8") as f:
             text = f.read().strip()
-        out_path = os.path.join(audio_dir, f"audio_{idx}.mp3")
+        out_path = os.path.join(
+            audio_dir,
+            indexed_basename("audio", index, ".mp3"),
+        )
         if not force and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
             print(f"[fish] reuse {os.path.basename(out_path)}")
             outputs.append(out_path)

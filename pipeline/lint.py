@@ -20,6 +20,7 @@ import asyncio
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.indexed_files import indexed_files
 
 CANVAS = (0, 0, config.WIDTH, config.HEIGHT)
 # frosted-glass safe area computed from the background shader (see md-krijin notes)
@@ -117,9 +118,17 @@ def lint(scene_paths, durations, names=None):
     return len(hard)
 
 
+def _default_scene_paths():
+    return list(
+        indexed_files(
+            os.path.join(config.DIR_SCENE, "scene_*.html")
+        ).values()
+    )
+
+
 if __name__ == "__main__":
-    import glob, json
-    scenes = sorted(glob.glob(os.path.join(config.DIR_SCENE, "scene_*.html")))
+    import json
+    scenes = _default_scene_paths()
     with open(config.DURATIONS_JSON, encoding="utf-8") as f:
         durs = json.load(f)
     lint(scenes, durs)

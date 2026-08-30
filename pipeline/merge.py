@@ -9,23 +9,23 @@ the narration concatenates without re-encoding. We then mux it onto the rendered
 
 import os
 import sys
-import glob
 import subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.indexed_files import indexed_files
 
 FINAL = os.path.join(config.DIR_OUTPUT, "final_output.mp4")
 TEMP_AUDIO = os.path.join(config.DIR_OUTPUT, "_main_audio.mp3")
 
 
 def concat_audio(audio_dir=config.DIR_AUDIO, out_path=TEMP_AUDIO):
-    audios = sorted(glob.glob(os.path.join(audio_dir, "audio_*.mp3")))
+    audios = indexed_files(os.path.join(audio_dir, "audio_*.mp3"))
     if not audios:
         return None
     list_path = os.path.join(config.DIR_OUTPUT, "_audio_list.txt")
     with open(list_path, "w", encoding="utf-8") as f:
-        for a in audios:
+        for a in audios.values():
             f.write(f"file '{os.path.abspath(a)}'\n")
     subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                     "-f", "concat", "-safe", "0", "-i", list_path,

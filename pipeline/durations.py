@@ -9,12 +9,12 @@ single source of truth for how long each scene must last.
 
 import os
 import sys
-import glob
 import json
 import subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.indexed_files import indexed_files
 
 
 def probe_seconds(media_path):
@@ -27,8 +27,8 @@ def probe_seconds(media_path):
 
 
 def build(audio_dir=config.DIR_AUDIO, out_json=config.DURATIONS_JSON):
-    audios = sorted(glob.glob(os.path.join(audio_dir, "audio_*.mp3")))
-    durations = [probe_seconds(a) for a in audios]
+    audios = indexed_files(os.path.join(audio_dir, "audio_*.mp3"))
+    durations = [probe_seconds(path) for path in audios.values()]
     with open(out_json, "w", encoding="utf-8") as f:
         json.dump(durations, f, indent=2)
     print(f"[durations] {len(durations)} clips, total {sum(durations):.3f}s -> {out_json}")
