@@ -144,6 +144,47 @@ class GenericProjectTests(unittest.TestCase):
             self.assertIn(asset.resolve().as_uri(), prompt)
             self.assertNotIn("file:///绝对路径", prompt)
 
+    def test_author_preserves_sparse_scene_indices_and_timelines(self) -> None:
+        from pipeline import author
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scripts = root / "scripts"
+            timelines = root / "srt_data"
+            prompts = root / "scene_html"
+            scripts.mkdir()
+            timelines.mkdir()
+            prompts.mkdir()
+            asset = root / "hero.png"
+            asset.write_bytes(b"png")
+            (scripts / "script_01.txt").write_text("第一场", encoding="utf-8")
+            (scripts / "script_03.txt").write_text("第三场", encoding="utf-8")
+            (timelines / "srt_01.json").write_text(
+                json.dumps([{"word": "第一场", "start": 0.0, "end": 1.0}]),
+                encoding="utf-8",
+            )
+            (timelines / "srt_03.json").write_text(
+                json.dumps([{"word": "第三场", "start": 0.0, "end": 1.0}]),
+                encoding="utf-8",
+            )
+
+            author.assemble_all(
+                str(scripts),
+                str(timelines),
+                assets=[str(asset)],
+                out_dir=str(prompts),
+            )
+
+            self.assertEqual(
+                ["prompt_01.txt", "prompt_03.txt"],
+                sorted(path.name for path in prompts.glob("prompt_*.txt")),
+            )
+            self.assertIn(
+                "第三场",
+                (prompts / "prompt_03.txt").read_text(encoding="utf-8"),
+            )
+            self.assertFalse((prompts / "prompt_02.txt").exists())
+
     def test_preview_uses_project_title_from_config(self) -> None:
         from pipeline import preview
 

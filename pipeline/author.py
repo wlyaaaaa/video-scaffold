@@ -78,12 +78,15 @@ def assemble_all(scripts_dir=config.DIR_SCRIPTS, srt_dir=config.DIR_SRT,
     scripts = sorted(glob.glob(os.path.join(scripts_dir, "script_*.txt")))
     assets = assets or sorted(glob.glob(os.path.join(config.DIR_ASSETS, "*.png")))
     prompts = []
-    for i, script in enumerate(scripts, 1):
-        idx = f"{i:02d}"
+    for position, script in enumerate(scripts):
+        suffix = Path(script).stem.rsplit("_", 1)[-1]
+        if not suffix.isdigit():
+            raise RuntimeError(f"invalid script filename: {os.path.basename(script)}")
+        idx = f"{int(suffix):02d}"
         with open(script, encoding="utf-8") as source:
             text = source.read().strip()
         srt = os.path.join(srt_dir, f"srt_{idx}.json")
-        asset = assets[(i - 1) % len(assets)] if assets else None
+        asset = assets[position % len(assets)] if assets else None
         prompt = build_prompt(text, srt, asset)
         with open(os.path.join(out_dir, f"prompt_{idx}.txt"), "w", encoding="utf-8") as f:
             f.write(prompt)
