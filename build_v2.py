@@ -279,8 +279,7 @@ def build_all():
 
 
 def _durs():
-    with open(config.DURATIONS_JSON, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return dur_mod.load_validated()
 
 
 def _count(dir_, pat):
@@ -326,7 +325,7 @@ def reset_workspace(confirm):
                config.DIR_SCENE, config.DIR_RENDERED, config.DIR_OUTPUT]
     if confirm != "yes":
         print("[reset] DRY-RUN. Would DELETE: scripts/ raw_audio/ srt_data/ scene_html/ "
-              "rendered/ output/ + durations.json")
+              "rendered/ output/ + durations.json and its identity")
         print("[reset] (kept: assets/ and all committed code).  Confirm with:")
         print("[reset]   python build_v2.py reset yes")
         return
@@ -334,6 +333,8 @@ def reset_workspace(confirm):
     for d in targets:
         _sh.rmtree(d, ignore_errors=True)
     try: os.remove(config.DURATIONS_JSON)
+    except OSError: pass
+    try: os.remove(dur_mod.identity_path())
     except OSError: pass
     config.ensure_dirs()
     print("[reset] workspace cleared. Next: swap assets/, edit SCENES in build_v2.py, "
@@ -358,7 +359,8 @@ def archive_project(name):
         src = os.path.join(config.ROOT, d)
         if os.path.isdir(src) and os.listdir(src):
             _sh.move(src, os.path.join(dest, d)); moved.append(d + "/")
-    for f in (config.DURATIONS_JSON, os.path.join(config.ROOT, "章节管理.txt")):
+    for f in (config.DURATIONS_JSON, dur_mod.identity_path(),
+              os.path.join(config.ROOT, "章节管理.txt")):
         if os.path.exists(f):
             _sh.move(f, os.path.join(dest, os.path.basename(f))); moved.append(os.path.basename(f))
     config.ensure_dirs()                 # recreate empty workspace = clean slate
@@ -391,21 +393,12 @@ def main():
     if stage in ("scripts", "all"):
         write_scripts()
     if stage in ("tts", "all"):
-        # Idempotent: approved narration is precious. Skip if every clip exists
-        # (this is the fix for the old "don't re-run tts/all, it overwrites" footgun).
-        if _count(config.DIR_AUDIO, "audio_*.mp3") >= len(SCENES) and not force:
-            print(f"[v2] tts: {len(SCENES)} clips already in raw_audio/ - skipping "
-                  f"(pass 'force' to re-synthesize the voice).")
-        else:
-            outs = fish_tts.synth_batch(force=force)
-            if len(outs) != len(SCENES):
-                sys.exit(f"[v2] TTS produced {len(outs)}/{len(SCENES)}")
+        outs = fish_tts.synth_batch(force=force)
+        if len(outs) != len(SCENES):
+            sys.exit(f"[v2] TTS produced {len(outs)}/{len(SCENES)}")
     if stage in ("timing", "all"):
         dur_mod.build()                       # durations are cheap + must track audio
-        if stage == "all" and _count(config.DIR_SRT, "srt_*.json") >= len(SCENES) and not force:
-            print(f"[v2] timing: {len(SCENES)} srt present - skipping whisper (pass 'force' to redo).")
-        else:
-            transcribe.transcribe_batch(force=force)
+        transcribe.transcribe_batch(force=force)
     scenes = build_all() if stage in ("build", "all") else sorted(glob.glob(os.path.join(config.DIR_SCENE, "scene_*.html")))
     if stage in ("lint", "all"):        # catch off-canvas text BEFORE the long render
         durs = _durs() if os.path.exists(config.DURATIONS_JSON) else [6.0] * len(scenes)

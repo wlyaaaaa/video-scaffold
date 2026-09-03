@@ -15,6 +15,7 @@ import json
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.artifact_identity import output_record_matches, sha256_file, write_output_record
 from pipeline.indexed_files import indexed_basename, indexed_files
 
 
@@ -47,6 +48,22 @@ _register_cuda_dlls()
 
 _model = None      # WhisperModel
 _pipe = None       # BatchedInferencePipeline (max GPU throughput) if available
+
+
+def _identity_record(audio_path):
+    return {
+        "schema": "video-scaffold.word-timing-identity.v1",
+        "audio_sha256": sha256_file(audio_path),
+        "model": config.WHISPER_MODEL,
+        "device": config.WHISPER_DEVICE,
+        "compute": config.WHISPER_COMPUTE,
+        "language": config.WHISPER_LANGUAGE,
+        "batch_size": config.WHISPER_BATCH_SIZE,
+        "cpu_threads": config.WHISPER_CPU_THREADS,
+        "initial_prompt": config.WHISPER_INITIAL_PROMPT,
+        "word_timestamps": True,
+        "vad_filter": True,
+    }
 
 
 def _get_engine():
@@ -97,10 +114,21 @@ def transcribe_batch(audio_dir=config.DIR_AUDIO, srt_dir=config.DIR_SRT, force=F
             srt_dir,
             indexed_basename("srt", index, ".json"),
         )
+        identity_path = os.path.join(
+            srt_dir,
+            indexed_basename("timing", index, ".identity.json"),
+        )
+        identity = _identity_record(audio)
         if not force and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
-            print(f"[whisper] reuse {os.path.basename(out_path)}")
-            continue
+            if output_record_matches(identity_path, identity, out_path):
+                print(f"[whisper] reuse {os.path.basename(out_path)} (audio identity matched)")
+                continue
+            raise RuntimeError(
+                f"{os.path.basename(out_path)} has no matching audio identity; "
+                "refusing stale word timing reuse. Review the audio, then run timing --force."
+            )
         transcribe_one(audio, out_path)
+        write_output_record(identity_path, identity, out_path)
 
 
 if __name__ == "__main__":

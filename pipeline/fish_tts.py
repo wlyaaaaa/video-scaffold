@@ -19,7 +19,20 @@ import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.artifact_identity import output_record_matches, sha256_bytes, write_output_record
 from pipeline.indexed_files import indexed_basename, indexed_files
+
+
+def _identity_record(text, reference_id, model):
+    return {
+        "schema": "video-scaffold.tts-artifact-identity.v1",
+        "script_sha256": sha256_bytes(text.encode("utf-8")),
+        "endpoint": config.FISH_ENDPOINT,
+        "model": model,
+        "reference_id": reference_id or "",
+        "format": config.FISH_FORMAT,
+        "tail_silence_seconds": config.SCENE_TAIL_SILENCE,
+    }
 
 
 def _pad_tail(path, seconds=None):
@@ -85,16 +98,26 @@ def synth_batch(scripts_dir=config.DIR_SCRIPTS, audio_dir=config.DIR_AUDIO,
             audio_dir,
             indexed_basename("audio", index, ".mp3"),
         )
+        identity_path = os.path.join(
+            audio_dir,
+            indexed_basename("audio", index, ".identity.json"),
+        )
+        identity = _identity_record(text, reference_id, model)
         if not force and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
-            print(f"[fish] reuse {os.path.basename(out_path)}")
-            outputs.append(out_path)
-            continue
+            if output_record_matches(identity_path, identity, out_path):
+                print(f"[fish] reuse {os.path.basename(out_path)} (source identity matched)")
+                outputs.append(out_path)
+                continue
+            raise RuntimeError(
+                f"{os.path.basename(out_path)} has no matching source identity; "
+                "refusing stale narration reuse. Review the script, then run tts --force."
+            )
         print(f"[fish] {os.path.basename(script)} -> {os.path.basename(out_path)} ({len(text)} chars)")
         if synth_one(text, out_path, reference_id=reference_id, model=model):
+            write_output_record(identity_path, identity, out_path)
             outputs.append(out_path)
         else:
-            print(f"  [fish] FAILED on {script}; aborting batch.")
-            break
+            raise RuntimeError(f"Fish synthesis failed for {os.path.basename(script)}")
     return outputs
 
 

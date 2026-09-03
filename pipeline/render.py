@@ -24,14 +24,98 @@ import time
 import queue
 import base64
 import asyncio
+import glob
+import re
 import subprocess
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 from collections import OrderedDict
 from multiprocessing import Process, Value, Lock, Queue
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.artifact_identity import read_record, sha256_file, write_record
 
 VIDEO_TRACK = os.path.join(config.DIR_OUTPUT, "video_track.mp4")
+RENDER_IDENTITY = "_render_identity.json"
+FILE_URI = re.compile(r'''file:///[^\s"'<>)]*''', re.IGNORECASE)
+
+
+def _scene_file_resources(scene_html_paths):
+    uris = set()
+    for scene_path in scene_html_paths:
+        with open(scene_path, encoding="utf-8") as source:
+            uris.update(FILE_URI.findall(source.read()))
+    resources = []
+    for uri in sorted(uris):
+        parsed = urlparse(uri)
+        local_path = url2pathname(unquote(parsed.path))
+        if not os.path.isfile(local_path):
+            raise FileNotFoundError(f"scene file resource is missing or unreadable: {uri}")
+        resources.append({"uri": uri, "sha256": sha256_file(local_path)})
+    return resources
+
+
+def _render_identity_record(scene_html_paths, durations, chunk_frames, total_frames):
+    return {
+        "schema": "video-scaffold.render-resume-identity.v1",
+        "scenes": [
+            {
+                "name": os.path.basename(path),
+                "sha256": sha256_file(path),
+                "duration_seconds": float(duration),
+            }
+            for path, duration in zip(scene_html_paths, durations)
+        ],
+        "file_resources": _scene_file_resources(scene_html_paths),
+        "background_sha256": sha256_file(config.BG_VIDEO),
+        "canvas": {"width": config.WIDTH, "height": config.HEIGHT, "fps": config.FPS},
+        "frames": {
+            "total": total_frames,
+            "chunk": chunk_frames,
+            "chunks": (total_frames + chunk_frames - 1) // chunk_frames,
+        },
+        "transition": {
+            "type": config.TRANSITION,
+            "seconds": config.TRANSITION_SECONDS,
+            "shift": config.TRANSITION_SHIFT,
+        },
+        "finishing": {
+            "cinematic": config.CINEMATIC,
+            "vignette_angle": config.VIGNETTE_ANGLE,
+            "grain": config.GRAIN,
+        },
+        "encoder": {
+            "codec": config.VCODEC,
+            "cq": config.CQ,
+            "extra": list(config.NVENC_EXTRA),
+        },
+        "screenshot_fast": config.SCREENSHOT_FAST,
+    }
+
+
+def _prepare_resume(identity, output_dir=None):
+    output_dir = output_dir or config.DIR_OUTPUT
+    identity_path = os.path.join(output_dir, RENDER_IDENTITY)
+    chunks = glob.glob(os.path.join(output_dir, "_chunk_*.mp4"))
+    previous = read_record(identity_path)
+    invalidated = previous != identity and bool(chunks)
+    if invalidated:
+        for path in chunks:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        remaining = [path for path in chunks if os.path.exists(path)]
+        if remaining:
+            raise RuntimeError(
+                "render inputs changed but stale resume chunks could not be removed: "
+                + ", ".join(os.path.basename(path) for path in remaining[:8])
+            )
+        print(f"[render] inputs changed; discarded {len(chunks)} stale resume chunk(s).")
+    if previous != identity:
+        write_record(identity_path, identity)
+    return invalidated
 
 
 def _bg_duration():
@@ -275,6 +359,9 @@ def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_worke
     import math
     chunk_frames = max(1, min(config.CHUNK_FRAMES, math.ceil(total_frames / num_workers)))
     total_chunks = (total_frames + chunk_frames - 1) // chunk_frames
+    _prepare_resume(
+        _render_identity_record(scene_html_paths, durations, chunk_frames, total_frames)
+    )
 
     def _expected(i):
         start_idx = i * chunk_frames
@@ -300,7 +387,6 @@ def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_worke
                 pass
 
     # 2. Delete any orphaned chunk files from a previous run with a larger total_chunks
-    import glob
     existing_chunks = glob.glob(os.path.join(config.DIR_OUTPUT, "_chunk_*.mp4"))
     for f in existing_chunks:
         try:
@@ -375,6 +461,8 @@ def render_timeline(scene_html_paths, durations, out_path=VIDEO_TRACK, num_worke
     for i in range(total_chunks):
         try: os.remove(os.path.join(config.DIR_OUTPUT, f"_chunk_{i:05d}.mp4"))
         except OSError: pass
+    try: os.remove(os.path.join(config.DIR_OUTPUT, RENDER_IDENTITY))
+    except OSError: pass
 
     print(f"\n[render] done in {time.time()-t0:.1f}s -> {out_path}")
     return out_path

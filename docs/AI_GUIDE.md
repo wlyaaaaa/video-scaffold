@@ -46,8 +46,9 @@ scripts → tts → timing → prompts
 
 对应命令统一为 `pwsh -File .\run.ps1 <stage>`。
 
-- `tts` 和 `timing` 默认复用已有非空结果。只有用户明确要变更旁白/重跑识别时使用
-  `--force`；重配音后必须重跑 timing、build、preview 和后续阶段。
+- `tts` 和 `timing` 只复用带匹配来源指纹的已有结果。脚本、模型、声线、音频或识别
+  配置改变，以及旧结果没有指纹时，普通运行会停止而不是沿用陈旧产物；审阅后使用
+  `--force` 明确重建。重配音后必须重跑 timing、build、preview 和后续阶段。
 - `prompts` 只组装提示词，不自动调用外部模型。当前 Codex/AI 直接生成并审阅 SVG 是
   正常路径，`pipeline.author.generate()` 保持未绑定不构成 blocker。
 - `build` 要求 scripts、fragments、word timelines 编号完全一致。任何 cue 未命中都会
@@ -55,6 +56,8 @@ scripts → tts → timing → prompts
 - `lint` 的 HARD 项必须修复。soft 项可结合全出血图片的设计意图人工判断。
 - `preview` 必须人工观看；自动检查不能替代动画节奏、信息层级和审美验收。
 - `render` 是耗时阶段，只能在 build、lint、preview 已完成后启动。
+- `render` 的中断续作只复用与当前场景 HTML、时长、背景和渲染配置指纹一致且帧数
+  正确的分片；输入变化会丢弃旧分片，不能把不同版本画面拼进同一条视频轨。
 - `verify` 是交付门。不得用“已渲染”“文件存在”或一次截图冒充最终 Ready。
 
 ## 场景编写规则

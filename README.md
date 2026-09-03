@@ -112,9 +112,12 @@ pwsh -File .\run.ps1 <阶段> [参数]
 推荐顺序如下：
 
 1. 写入 `scripts/script_01.txt`、`script_02.txt`……每场一份旁白。
-2. `tts`：Fish 生成旁白。已有非空音频默认复用；只有明确要重配时用 `tts --force`。
-3. `timing`：生成 `durations.json` 和 Whisper 词级时间轴；默认复用已验收时间轴，
-   `timing --force` 才重跑。
+2. `tts`：Fish 生成旁白。只有音频的来源指纹仍与脚本文本、模型、声线、格式和场间
+   停顿匹配时才默认复用；旧音频缺指纹或脚本已变化会停止并要求审阅，明确重配时用
+   `tts --force`。
+3. `timing`：生成 `durations.json` 和 Whisper 词级时间轴；只有时间轴仍绑定当前音频
+   字节与识别配置时才复用，旧结果缺指纹或音频已变化会停止，确认后用
+   `timing --force` 重跑。
 4. `prompts`：生成 `scene_html/prompt_NN.txt`。素材会以真实绝对 `file:` URI 注入。
 5. 人或 AI 审阅提示词并把每场静态 SVG 片段保存成
    `scene_html/fragment_NN.svg`。`pipeline.author.generate()` 故意不绑定任何模型；
@@ -123,7 +126,8 @@ pwsh -File .\run.ps1 <阶段> [参数]
    编号不一致或 cue 未命中都会失败，不会静默带病进入长渲染。
 7. `lint`：阻断画布外文字等 HARD 布局错误。
 8. `preview`：生成 `output/preview.html`，人工检查所有动画、留白和 cue。
-9. `render`：逐帧生成 `output/video_track.mp4`，并核验每个分片和整轨帧数。
+9. `render`：逐帧生成 `output/video_track.mp4`，并核验每个分片和整轨帧数。中断续作
+   只复用与当前场景、时长、背景和渲染配置指纹一致的分片；输入变化会自动丢弃旧分片。
 10. `merge`：拼接旁白，可选 BGM 侧链闪避，生成 `output/final_output.mp4`。
 11. `cover`：按 `PROJECT_TITLE` 生成 3840×2160 封面。可传
     `--subtitle`、`--kicker`、`--hero`。
@@ -185,7 +189,8 @@ pwsh -File .\run.ps1 <阶段> [参数]
 ## 开发原则
 
 - 不在未授权时自动生成选题、脚本、分镜或演示视频。
-- 已验收旁白默认不可变，避免重跑 TTS 造成 cue 与画面漂移。
+- 已验收旁白默认不可变；复用同时要求来源指纹匹配，避免脚本变化后仍沿用旧音频，
+  或音频变化后仍沿用旧时间轴。
 - 长渲染前必须先过 `build`、`lint` 和人工 `preview`。
 - 所有随机视觉参数在 Python 端用固定种子预生成；浏览器运行时禁止依赖真实时钟或
   `Math.random()`。

@@ -334,9 +334,12 @@ class GenericProjectTests(unittest.TestCase):
                 )
                 (audio / f"audio_{index}.mp3").write_bytes(str(index).encode("ascii"))
 
-            with mock.patch.object(fish_tts, "synth_one") as synth:
-                tts_outputs = fish_tts.synth_batch(str(scripts), str(audio))
-            synth.assert_not_called()
+            with mock.patch.object(fish_tts, "synth_one", return_value=True) as synth:
+                tts_outputs = fish_tts.synth_batch(str(scripts), str(audio), force=True)
+            self.assertEqual(
+                ["audio_99.mp3", "audio_100.mp3"],
+                [Path(call.args[1]).name for call in synth.call_args_list],
+            )
             self.assertEqual(
                 ["audio_99.mp3", "audio_100.mp3"],
                 [Path(path).name for path in tts_outputs],
@@ -346,6 +349,7 @@ class GenericProjectTests(unittest.TestCase):
 
             def record_transcript(audio_path: str, out_path: str) -> None:
                 transcript_calls.append((Path(audio_path).name, Path(out_path).name))
+                Path(out_path).write_text("[]", encoding="utf-8")
 
             with mock.patch.object(
                 transcribe,
@@ -512,7 +516,7 @@ class GenericProjectTests(unittest.TestCase):
         self.assertEqual("BUSY", check.status)
         self.assertIn("1252 MiB free", check.detail)
 
-    def test_existing_tts_audio_is_reused_unless_force_is_requested(self) -> None:
+    def test_tts_reuse_requires_matching_script_and_configuration_identity(self) -> None:
         from pipeline import fish_tts
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -523,7 +527,13 @@ class GenericProjectTests(unittest.TestCase):
             audio.mkdir()
             (scripts / "script_01.txt").write_text("测试旁白", encoding="utf-8")
             accepted = audio / "audio_01.mp3"
-            accepted.write_bytes(b"accepted")
+
+            def synthesize(_text, out_path, **_kwargs):
+                Path(out_path).write_bytes(b"accepted")
+                return True
+
+            with mock.patch.object(fish_tts, "synth_one", side_effect=synthesize):
+                fish_tts.synth_batch(str(scripts), str(audio), force=True)
 
             with mock.patch.object(fish_tts, "synth_one") as synth:
                 outputs = fish_tts.synth_batch(str(scripts), str(audio))
@@ -531,11 +541,21 @@ class GenericProjectTests(unittest.TestCase):
             synth.assert_not_called()
             self.assertEqual([str(accepted)], outputs)
 
-            with mock.patch.object(fish_tts, "synth_one", return_value=True) as synth:
+            (scripts / "script_01.txt").write_text("已经修改的旁白", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "refusing stale narration reuse"):
+                fish_tts.synth_batch(str(scripts), str(audio))
+
+            with (
+                mock.patch.object(fish_tts, "synth_one", return_value=False),
+                self.assertRaisesRegex(RuntimeError, "Fish synthesis failed"),
+            ):
+                fish_tts.synth_batch(str(scripts), str(audio), force=True)
+
+            with mock.patch.object(fish_tts, "synth_one", side_effect=synthesize) as synth:
                 fish_tts.synth_batch(str(scripts), str(audio), force=True)
             synth.assert_called_once()
 
-    def test_existing_word_timing_is_reused_unless_force_is_requested(self) -> None:
+    def test_timing_reuse_requires_matching_audio_and_model_identity(self) -> None:
         from pipeline import transcribe
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -546,13 +566,126 @@ class GenericProjectTests(unittest.TestCase):
             timelines.mkdir()
             (audio / "audio_01.mp3").write_bytes(b"audio")
             accepted = timelines / "srt_01.json"
-            accepted.write_text("[]", encoding="utf-8")
+
+            def transcribe_audio(_audio_path, out_path):
+                Path(out_path).write_text("[]", encoding="utf-8")
+                return []
+
+            with mock.patch.object(transcribe, "transcribe_one", side_effect=transcribe_audio):
+                transcribe.transcribe_batch(str(audio), str(timelines), force=True)
 
             with mock.patch.object(transcribe, "transcribe_one") as transcribe_one:
                 transcribe.transcribe_batch(str(audio), str(timelines))
                 transcribe_one.assert_not_called()
+
+            (audio / "audio_01.mp3").write_bytes(b"changed audio")
+            with self.assertRaisesRegex(RuntimeError, "refusing stale word timing reuse"):
+                transcribe.transcribe_batch(str(audio), str(timelines))
+
+            with mock.patch.object(transcribe, "transcribe_one", side_effect=transcribe_audio) as transcribe_one:
                 transcribe.transcribe_batch(str(audio), str(timelines), force=True)
                 transcribe_one.assert_called_once()
+
+    def test_render_resume_identity_discards_only_chunks_from_changed_inputs(self) -> None:
+        from pipeline import render
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "output"
+            output.mkdir()
+            background = root / "background.mp4"
+            scene = root / "scene_01.html"
+            background.write_bytes(b"background-v1")
+            scene.write_text("<html>scene-v1</html>", encoding="utf-8")
+
+            with mock.patch.object(render.config, "BG_VIDEO", str(background)):
+                first = render._render_identity_record([str(scene)], [2.0], 120, 120)
+                self.assertFalse(render._prepare_resume(first, str(output)))
+                chunk = output / "_chunk_00000.mp4"
+                chunk.write_bytes(b"accepted chunk")
+
+                self.assertFalse(render._prepare_resume(first, str(output)))
+                self.assertTrue(chunk.exists())
+
+                scene.write_text("<html>scene-v2</html>", encoding="utf-8")
+                changed = render._render_identity_record([str(scene)], [2.0], 120, 120)
+                self.assertTrue(render._prepare_resume(changed, str(output)))
+                self.assertFalse(chunk.exists())
+
+                chunk.write_bytes(b"locked stale chunk")
+                scene.write_text("<html>scene-v3</html>", encoding="utf-8")
+                changed_again = render._render_identity_record([str(scene)], [2.0], 120, 120)
+                with (
+                    mock.patch.object(render.os, "remove", side_effect=PermissionError("locked")),
+                    self.assertRaisesRegex(RuntimeError, "stale resume chunks could not be removed"),
+                ):
+                    render._prepare_resume(changed_again, str(output))
+
+    def test_render_resume_identity_tracks_file_uri_resource_bytes(self) -> None:
+        from pipeline import render
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "output"
+            output.mkdir()
+            background = root / "background.mp4"
+            asset = root / "hero image.png"
+            scene = root / "scene_01.html"
+            background.write_bytes(b"background")
+            asset.write_bytes(b"asset-v1")
+            scene.write_text(
+                f'<html><image href="{asset.resolve().as_uri()}"></html>',
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(render.config, "BG_VIDEO", str(background)):
+                first = render._render_identity_record([str(scene)], [2.0], 120, 120)
+                self.assertFalse(render._prepare_resume(first, str(output)))
+                chunk = output / "_chunk_00000.mp4"
+                chunk.write_bytes(b"accepted chunk")
+
+                asset.write_bytes(b"asset-v2")
+                changed = render._render_identity_record([str(scene)], [2.0], 120, 120)
+                self.assertTrue(render._prepare_resume(changed, str(output)))
+                self.assertFalse(chunk.exists())
+
+                scene.write_text('<html><image href="file:///Z:/missing.png"></html>', encoding="utf-8")
+                with self.assertRaisesRegex(FileNotFoundError, "scene file resource is missing"):
+                    render._render_identity_record([str(scene)], [2.0], 120, 120)
+
+    def test_duration_identity_blocks_later_stages_after_audio_changes(self) -> None:
+        from pipeline import durations, workflow
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            audio = root / "audio"
+            audio.mkdir()
+            clip = audio / "audio_01.mp3"
+            clip.write_bytes(b"audio-v1")
+            duration_path = root / "durations.json"
+            with mock.patch.object(durations, "probe_seconds", return_value=2.5):
+                durations.build(str(audio), str(duration_path))
+
+            with (
+                mock.patch.object(workflow.config, "DIR_AUDIO", str(audio)),
+                mock.patch.object(workflow.config, "DURATIONS_JSON", str(duration_path)),
+            ):
+                self.assertEqual([2.5], workflow._load_durations(1))
+                clip.write_bytes(b"audio-v2")
+                with self.assertRaisesRegex(RuntimeError, "does not match the current narration audio"):
+                    workflow._load_durations(1)
+
+    def test_legacy_builder_cannot_bypass_artifact_identity_checks(self) -> None:
+        source_path = Path(__file__).resolve().parents[1] / "build_v2.py"
+        if not source_path.exists():
+            # Fresh projects deliberately omit this source-repository-only example.
+            return
+        source = source_path.read_text(encoding="utf-8")
+        self.assertNotIn("clips already in raw_audio/ - skipping", source)
+        self.assertNotIn("srt present - skipping whisper", source)
+        self.assertIn("fish_tts.synth_batch(force=force)", source)
+        self.assertIn("transcribe.transcribe_batch(force=force)", source)
+        self.assertIn("dur_mod.load_validated()", source)
 
     def test_generic_workflow_exposes_every_delivery_stage(self) -> None:
         from pipeline import workflow

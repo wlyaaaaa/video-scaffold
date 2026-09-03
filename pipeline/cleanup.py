@@ -24,6 +24,7 @@ def cleanup(keep_srt=True, keep_scene_html=True):
                 os.path.join(config.DIR_OUTPUT, "_concat.txt"),
                 os.path.join(config.DIR_OUTPUT, "_audio_list.txt"),
                 os.path.join(config.DIR_OUTPUT, "_main_audio.mp3"),
+                os.path.join(config.DIR_OUTPUT, "_render_identity.json"),
                 os.path.join(config.DIR_RENDERED, "*")):
         for f in glob.glob(pat):
             try:

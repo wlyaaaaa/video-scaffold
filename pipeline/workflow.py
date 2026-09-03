@@ -45,6 +45,10 @@ def _same_indices(left_name: str, left: dict[int, str], right_name: str,
 def _load_durations(scene_count: int | None = None) -> list[float]:
     if not os.path.isfile(config.DURATIONS_JSON):
         raise RuntimeError("durations.json is missing; run timing first")
+    if not durations.identity_matches(config.DIR_AUDIO, config.DURATIONS_JSON):
+        raise RuntimeError(
+            "durations.json does not match the current narration audio; run timing first"
+        )
     with open(config.DURATIONS_JSON, encoding="utf-8") as source:
         values = json.load(source)
     if not isinstance(values, list) or not values or any(
