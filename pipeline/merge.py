@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 import config
+from pipeline.io_utils import safe_print as print
 from pipeline.indexed_files import indexed_files
 from pipeline.io_utils import atomic_output, concat_entry, positive, run
 

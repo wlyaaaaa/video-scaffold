@@ -14,6 +14,7 @@ import subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.io_utils import safe_print as print
 from pipeline.artifact_identity import (
     output_record_matches,
     sha256_file,

@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 import tempfile
+from pipeline.io_utils import safe_print as print
 
 HERE = str(Path(__file__).resolve().parent)
 UNIVERSAL = [

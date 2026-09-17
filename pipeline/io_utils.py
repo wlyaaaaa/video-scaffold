@@ -255,3 +255,29 @@ def encoder_process(command, timeout):
                     process.kill()
                     process.wait(timeout=3)
             job.close()
+
+
+def safe_print(*values, **kwargs):
+    """Keep diagnostics usable with legacy Windows pipe encodings.
+
+    CLI entrypoints request UTF-8. A library caller may still provide a cp1252
+    stream; retain unrepresentable characters as escapes rather than failing
+    the business operation or mutating the caller's global stream settings.
+    """
+    import builtins
+    import sys
+
+    stream = kwargs.get("file") or sys.stdout
+    encoding = getattr(stream, "encoding", None)
+    if encoding:
+
+        def represent(value):
+            return (
+                str(value).encode(encoding, errors="backslashreplace").decode(encoding)
+            )
+
+        values = tuple(represent(value) for value in values)
+        for key in ("sep", "end"):
+            if kwargs.get(key) is not None:
+                kwargs[key] = represent(kwargs[key])
+    builtins.print(*values, **kwargs)

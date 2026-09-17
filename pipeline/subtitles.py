@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import config
+from pipeline.io_utils import safe_print as print
 from pipeline import contracts
 from pipeline.io_utils import atomic_text
 

@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 from fractions import Fraction
 import config
+from pipeline.io_utils import safe_print as print
 from pipeline.io_utils import run, positive
 
 

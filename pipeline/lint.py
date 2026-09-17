@@ -20,6 +20,7 @@ import asyncio
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.io_utils import safe_print as print
 from pathlib import Path
 from pipeline.browser_runtime import ready
 from pipeline.indexed_files import indexed_files

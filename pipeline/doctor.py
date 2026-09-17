@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.io_utils import safe_print as print
 
 
 @dataclass(frozen=True)

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import config
+from pipeline.io_utils import safe_print as print
 
 
 def _browser_acceptance():

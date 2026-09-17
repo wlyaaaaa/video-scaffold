@@ -16,6 +16,19 @@ from helpers import project_graph
 
 
 class FinalRegressionTests(unittest.TestCase):
+    def test_chinese_diagnostics_survive_legacy_windows_encoding(self):
+        from io import BytesIO, TextIOWrapper
+        from pipeline.chapters import audit
+
+        binary = BytesIO()
+        stream = TextIOWrapper(binary, encoding="cp1252")
+        with redirect_stdout(stream):
+            audit([(0.0, "开场"), (1.0, "末段")])
+        stream.flush()
+        self.assertIn(b"\\u672b\\u6bb5", binary.getvalue())
+        self.assertEqual(stream.encoding, "cp1252")
+        stream.detach()
+
     def test_empty_local_key_preserves_environment_fallback(self):
         stub = types.ModuleType("secret_local")
         stub.FISH_API_KEY = ""

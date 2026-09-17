@@ -80,7 +80,7 @@ else {
 
 Push-Location $projectRoot
 try {
-    & $pythonCommand @pythonPrefix -B @arguments
+    & $pythonCommand @pythonPrefix -X utf8 -B @arguments
     exit $LASTEXITCODE
 }
 finally {

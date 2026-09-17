@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import tempfile
 import config
+from pipeline.io_utils import safe_print as print
 from pipeline.io_utils import atomic_text, publish_bundle
 from pipeline.artifact_identity import write_output_record
 from pipeline.browser_runtime import ready

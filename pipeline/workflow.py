@@ -17,6 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pipeline.io_utils import safe_print as print
 from pipeline import author, build_scene, chapters, cleanup, cover, durations
 from pipeline import fish_tts, lint, merge, preview, render, transcribe
 from pipeline.indexed_files import indexed_files

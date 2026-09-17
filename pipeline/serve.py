@@ -9,6 +9,7 @@ import mimetypes
 import os
 import threading
 import config
+from pipeline.io_utils import safe_print as print
 from pipeline.resources import inventory
 from pipeline.indexed_files import indexed_files
 
