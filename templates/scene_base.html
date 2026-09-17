@@ -438,6 +438,11 @@
     for (const rec of nodes) apply(rec, t);
   };
 
+  window.addEventListener('message', event => {
+    if (event.source !== parent || event.data?.type !== 'video-scaffold.seek') return;
+    const t=event.data.time;
+    if (typeof t === 'number' && Number.isFinite(t) && t>=0) window.seekTime(t);
+  });
   window.seekTime(0);
 
   // Optional self-driven preview loop. When the page is opened with ?dur=SECONDS

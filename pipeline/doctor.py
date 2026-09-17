@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """Local workflow preflight. It creates no video project content.
 
-Default checks are local and reversible. ``--live-fish`` additionally sends one
+Default checks are static and read-only (no browser, GPU, model download or key file read).
+``--live-local`` explicitly runs local browser/encoder/CUDA probes. ``--live-fish`` additionally sends one
 very short TTS request through the configured Fish route and deletes the probe
 audio immediately after validation.
 """
@@ -41,6 +42,8 @@ def _run(command: list[str], *, timeout: int = 30) -> subprocess.CompletedProces
         command,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         check=False,
     )
@@ -65,15 +68,9 @@ def _probe(path: str) -> dict[str, object]:
 
 
 def _package_check() -> Check:
-    packages = (
-        "playwright",
-        "faster-whisper",
-        "requests",
-        "moderngl",
-        "numpy",
-        "nvidia-cublas-cu12",
-        "nvidia-cuda-runtime-cu12",
-    )
+    packages = ["playwright", "requests"]
+    if config.TIMING_SOURCE == "whisper":
+        packages += ["faster-whisper", "ctranslate2"]
     missing = []
     versions = []
     for package in packages:
@@ -92,7 +89,9 @@ def _background_check() -> Check:
     try:
         probe = _probe(config.BG_VIDEO)
         video = next(
-            stream for stream in probe.get("streams", []) if stream.get("codec_type") == "video"
+            stream
+            for stream in probe.get("streams", [])
+            if stream.get("codec_type") == "video"
         )
         rate = str(video.get("r_frame_rate", "0/1"))
         numerator, denominator = (float(part) for part in rate.split("/", 1))
@@ -117,8 +116,13 @@ def _playwright_check() -> Check:
 
         uri = pathlib.Path(config.TEMPLATE_BASE).as_uri() + "?dur=1"
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page(viewport={"width": config.WIDTH, "height": config.HEIGHT})
+            try:
+                browser = playwright.chromium.launch(headless=True, channel="chrome")
+            except Exception:
+                browser = playwright.chromium.launch(headless=True)
+            page = browser.new_page(
+                viewport={"width": config.WIDTH, "height": config.HEIGHT}
+            )
             page.goto(uri, wait_until="load")
             stage_count = page.locator("#stage").count()
             runtime = page.evaluate("typeof window.seekTime")
@@ -161,20 +165,20 @@ def _nvenc_check() -> Check:
         "-f",
         "lavfi",
         "-i",
-        "color=c=black:s=3840x2160:r=60:d=0.1",
+        f"color=c=black:s={config.WIDTH}x{config.HEIGHT}:r={config.FPS}:d=0.1",
         "-frames:v",
         "1",
         "-c:v",
         config.VCODEC,
-        "-preset",
-        "p6",
-        "-pix_fmt",
-        "yuv420p10le",
+        *config.NVENC_EXTRA,
         "-f",
         "null",
         os.devnull,
     ]
-    completed = _run(command, timeout=60)
+    from pipeline.gpu import gpu_lease
+
+    with gpu_lease(config.VCODEC.endswith("_nvenc")):
+        completed = _run(command, timeout=60)
     error = completed.stderr.strip()
     if completed.returncode != 0 and (
         "out of memory" in error.lower() or "cannot allocate memory" in error.lower()
@@ -197,35 +201,56 @@ def _cuda_check() -> Check:
         import ctranslate2
 
         count = ctranslate2.get_cuda_device_count()
-        compute = sorted(ctranslate2.get_supported_compute_types("cuda")) if count else []
-        return _check("whisper-cuda", count > 0, f"devices={count}, compute={','.join(compute)}")
+        compute = (
+            sorted(ctranslate2.get_supported_compute_types("cuda")) if count else []
+        )
+        return _check(
+            "whisper-cuda", count > 0, f"devices={count}, compute={','.join(compute)}"
+        )
     except Exception as error:
         return Check("whisper-cuda", "FAIL", str(error))
 
 
 def _model_cache_check() -> Check:
-    slug = "models--Systran--faster-whisper-large-v3"
-    cache = pathlib.Path.home() / ".cache" / "huggingface" / "hub" / slug
+    model = str(config.WHISPER_MODEL)
+    if pathlib.Path(model).is_dir():
+        paths = [pathlib.Path(model) / "model.bin"]
+    else:
+        home = pathlib.Path(
+            os.environ.get(
+                "HF_HOME", str(pathlib.Path.home() / ".cache" / "huggingface")
+            )
+        )
+        cache = pathlib.Path(os.environ.get("HF_HUB_CACHE", str(home / "hub")))
+        slug = "models--" + (
+            model if "/" in model else "Systran/faster-whisper-" + model
+        ).replace("/", "--")
+        paths = list((cache / slug / "snapshots").glob("*/model.bin"))
+    found = any(path.is_file() and path.stat().st_size > 0 for path in paths)
     return _check(
         "whisper-model-cache",
-        cache.is_dir(),
-        str(cache) if cache.is_dir() else "large-v3 will need a first-run download",
+        found,
+        "model weights located; actual inference not checked"
+        if found
+        else "local weights not located; no download was attempted",
         warning=True,
     )
 
 
 def _fish_config_check() -> Check:
-    ready = bool(config.FISH_API_KEY and config.FISH_MODEL and config.FISH_REFERENCE_ID)
+    ready = bool(
+        config.get_fish_api_key() and config.FISH_MODEL and config.FISH_REFERENCE_ID
+    )
     return _check(
         "fish-config",
         ready,
         f"model={config.FISH_MODEL}, voice={'configured' if config.FISH_REFERENCE_ID else 'missing'}, "
-        f"key={'configured' if config.FISH_API_KEY else 'missing'}",
+        f"key={'configured' if ready else 'missing'}",
     )
 
 
 def _fish_live_check() -> Check:
-    if not config.FISH_API_KEY:
+    if not config.get_fish_api_key():
         return Check("fish-live", "FAIL", "FISH_API_KEY is not configured")
     try:
         from pipeline import fish_tts
@@ -236,7 +261,9 @@ def _fish_live_check() -> Check:
                 return Check("fish-live", "FAIL", "Fish rejected the configured route")
             probe = _probe(output)
             audio = next(
-                stream for stream in probe.get("streams", []) if stream.get("codec_type") == "audio"
+                stream
+                for stream in probe.get("streams", [])
+                if stream.get("codec_type") == "audio"
             )
             duration = float(probe.get("format", {}).get("duration", 0.0))
             valid = audio.get("codec_name") == "mp3" and duration > 0
@@ -249,33 +276,98 @@ def _fish_live_check() -> Check:
         return Check("fish-live", "FAIL", str(error))
 
 
-def run_checks(*, live_fish: bool = False) -> list[Check]:
+def run_checks(*, live_fish: bool = False, live_local: bool = False) -> list[Check]:
     checks = [
-        _check(
-            "python",
-            sys.version_info >= (3, 11),
-            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-        ),
+        _check("python", sys.version_info >= (3, 11), sys.version.split()[0]),
         _package_check(),
-        _check("ffmpeg", shutil.which("ffmpeg") is not None, shutil.which("ffmpeg") or "missing"),
-        _check("ffprobe", shutil.which("ffprobe") is not None, shutil.which("ffprobe") or "missing"),
+        _check(
+            "ffmpeg",
+            shutil.which("ffmpeg") is not None,
+            shutil.which("ffmpeg") or "missing",
+        ),
+        _check(
+            "ffprobe",
+            shutil.which("ffprobe") is not None,
+            shutil.which("ffprobe") or "missing",
+        ),
+        _check(
+            "background-file",
+            os.path.isfile(config.BG_VIDEO),
+            "tracked background exists",
+        ),
+        _check(
+            "scene-template",
+            os.path.isfile(config.TEMPLATE_BASE),
+            "scene template exists",
+        ),
+        Check(
+            "mode",
+            "PASS",
+            "live-local probes requested"
+            if live_local
+            else "static read-only; no browser/GPU/network/private key read",
+        ),
+        Check(
+            "fish-route",
+            "UNKNOWN",
+            f"configured model={config.FISH_MODEL}; account and voice not tested",
+        ),
+        Check(
+            "gpu-coordination",
+            "PASS" if config.GPU_BROKER_URL else "WARN",
+            "existing broker configured"
+            if config.GPU_BROKER_URL
+            else "standalone mode; set machine GPU broker adapter on managed hosts",
+        ),
     ]
-    if checks[-2].status == "PASS" and checks[-1].status == "PASS":
-        checks.extend((_background_check(), _nvenc_check()))
-    checks.extend((_playwright_check(), _cuda_check(), _model_cache_check(), _fish_config_check()))
+    if config.TIMING_SOURCE == "whisper":
+        checks.append(_model_cache_check())
+    if live_local:
+        for name, function in (
+            ("background", _background_check),
+            ("nvenc", _nvenc_check),
+            ("svg-runtime", _playwright_check),
+        ):
+            try:
+                checks.append(function())
+            except Exception as error:
+                checks.append(Check(name, "FAIL", str(error)))
+        if config.TIMING_SOURCE == "whisper" and config.WHISPER_DEVICE == "cuda":
+            from pipeline.gpu import gpu_lease
+
+            try:
+                with gpu_lease():
+                    checks.append(_cuda_check())
+            except Exception as error:
+                checks.append(Check("whisper-cuda", "FAIL", str(error)))
     if live_fish:
-        checks.append(_fish_live_check())
+        checks.extend((_fish_config_check(), _fish_live_check()))
     return checks
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate the local video workflow without starting a video.")
-    parser.add_argument("--live-fish", action="store_true", help="send one minimal Fish TTS probe")
-    parser.add_argument("--json", action="store_true", help="emit machine-readable results")
+    parser = argparse.ArgumentParser(
+        description="Validate the local video workflow without starting a video."
+    )
+    parser.add_argument(
+        "--live-local",
+        action="store_true",
+        help="run explicit browser, GPU encoder and CUDA probes",
+    )
+    parser.add_argument(
+        "--live-fish", action="store_true", help="send one minimal Fish TTS probe"
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="emit machine-readable results"
+    )
     args = parser.parse_args()
-    checks = run_checks(live_fish=args.live_fish)
+    checks = run_checks(live_fish=args.live_fish, live_local=args.live_local)
     if args.json:
-        print(json.dumps([asdict(check) for check in checks], ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                [asdict(check) for check in checks], ensure_ascii=False, indent=2
+            )
+        )
     else:
         for check in checks:
             print(f"[{check.status:4s}] {check.name}: {check.detail}")

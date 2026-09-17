@@ -1,88 +1,31 @@
-# AI 执行指引：通用视频工作流
+# AI 执行指引
 
-这份文档约束 AI 如何使用脚手架。除非用户明确授权开始某一期视频，否则只允许做
-环境体检、工作流测试和通用代码维护；不要自行确定选题、写文案、做分镜或生成演示内容。
+项目规则入口是根目录 AGENTS.md。具体命令、副作用及恢复语义见 WORKFLOW.md；这里不重复全局授权、机器事实或易变模型清单。
 
-## 开工门槛
+## 从目标选择检查
 
-1. 先运行 `pwsh -File .\run.ps1 doctor`。
-2. 需要验证 Fish 真实链路时运行 `doctor-live`；它只产生并删除一条临时探针音频。
-3. 确认 `config.py` 中的 Fish 模型/声线仍是唯一配置源，不复制 ID 到业务脚本。
-4. 只有用户明确给出本期目标后，才设置 `PROJECT_TITLE`、Whisper 热词和内容文件。
+普通环境查看只运行 doctor，工程状态查看使用 status/plan。真实本地探针需 doctor-local，外部配音探针需 doctor-live。不要因为“检查”自动开始制作本期视频、下载模型、播放原件或调用外部账户。
 
-环境 Ready 与视频 Ready 必须分开报告。前者只表示依赖、Fish、SVG、GPU 和编码可用；
-后者必须等成片、封面、章节和最终 `verify` 全部通过。
+已授权制作时，按 scripts、tts、timing、prompts、审阅片段、build、lint、preview、render、merge、cover/chapters、可选 subtitles、verify/manifest 的顺序完成。人或当前 AI 直接编写 SVG 是主路径，author.generate 保持未绑定不是缺陷。
 
-## 文件职责
+## 保持来源可验证
 
-| 路径 | 职责 |
-|---|---|
-| `config.py` | 画布、编码、Fish、Whisper、项目标题与路径的唯一配置源 |
-| `run.ps1` | Python 3.11 选择与统一命令入口 |
-| `pipeline/workflow.py` | 通用阶段编排与跨阶段编号/数量校验 |
-| `v2lib.py` / `pipeline/components.py` | 可复用 SVG 组件 |
-| `templates/scene_base.html` | `seekTime(t)` 确定性动画运行时 |
-| `scripts/` | 每场旁白，`script_NN.txt` |
-| `scene_html/fragment_NN.svg` | AI/人工审阅后的场景 SVG 源片段 |
-| `output/` | 预览、视频轨、最终成片、封面和章节 |
+按真实场景编号配对，不按列表位置猜测。每次读取后续产物都重新核验当前来源；缺记录、过期记录、被改动的产物不能手工伪造指纹后放行。--force 表示明确重生成，不表示忽略校验错误。
 
-`build_v2.py` 和 `templates/cover_md*.html` 是旧定制示例，不是当前入口，也不会复制到
-新项目。不要为了开始新视频去改它们。
+重配音后，旧时间轴与后续产物必须重新验证。相同输入的场景、合法分片可以复用，失败的临时产物不得代替上一份有效结果。不要用旧定制生成器、reset/archive 或 demo 覆盖当前工程。当前 demo/smoke 仅创建独立空项目。
 
-## 标准阶段
+## 审阅画面和时间
 
-```text
-doctor / doctor-live
-  ↓
-scripts → tts → timing → prompts
-                         ↓ 人或 AI 审阅并写 fragment_NN.svg
-                      build → lint → preview（人工观看）
-                                         ↓
-                              render → merge
-                              cover + chapters
-                                         ↓
-                                      verify
-```
+SVG 片段不得引入独立脚本、真实时钟或浏览器随机数；由 seekTime(t) 驱动。定位放外层，动画放内层。cue 支持一个兜底延时，成功解析后得到唯一生效延时。重复词使用 data-cue-index，时间调整使用 data-cue-offset。
 
-对应命令统一为 `pwsh -File .\run.ps1 <stage>`。
+词时间是模型估计，字符时间可能使用插值，不要把“渲染按帧运行”写成语音绝对准确。有声预览用于听看同步；界面导出 SVG，不直接修改工程，保存后重建才生效。预览省略最终转场、动态背景、胶片效果和 BGM，不能替代观看成片。
 
-- `tts` 和 `timing` 只复用带匹配来源指纹的已有结果。脚本、模型、声线、音频或识别
-  配置改变，以及旧结果没有指纹时，普通运行会停止而不是沿用陈旧产物；审阅后使用
-  `--force` 明确重建。重配音后必须重跑 timing、build、preview 和后续阶段。
-- `prompts` 只组装提示词，不自动调用外部模型。当前 Codex/AI 直接生成并审阅 SVG 是
-  正常路径，`pipeline.author.generate()` 保持未绑定不构成 blocker。
-- `build` 要求 scripts、fragments、word timelines 编号完全一致。任何 cue 未命中都会
-  生成可审计标记并使阶段失败。
-- `lint` 的 HARD 项必须修复。soft 项可结合全出血图片的设计意图人工判断。
-- `preview` 必须人工观看；自动检查不能替代动画节奏、信息层级和审美验收。
-- `render` 是耗时阶段，只能在 build、lint、preview 已完成后启动。
-- `render` 的中断续作只复用与当前场景 HTML、时长、背景和渲染配置指纹一致且帧数
-  正确的分片；输入变化会丢弃旧分片，不能把不同版本画面拼进同一条视频轨。
-- `verify` 是交付门。不得用“已渲染”“文件存在”或一次截图冒充最终 Ready。
+布局检查必须真正执行，空页面、缺 #stage/seekTime、图片失败或 JavaScript 错误不能说成“零个问题”。字体和图片就绪后才进行检查和截图。素材仅使用已核实的本地依赖，远端素材应先明确本地化。
 
-## 场景编写规则
+## 报告真实结果
 
-- 每场只输出 `<svg id="stage">` 内部片段，不含外层 `<svg>`、HTML、CSS 或脚本。
-- 外层 `<g transform>` 负责定位；带 `data-anim` 的内层节点不要再带 transform。
-- 优先使用 `data-cue="旁白真词"`，并附合理 `data-delay` 作为视觉兜底。
-- cue 只能引用真实发音，不可引用只显示在屏幕上的数字或标题。
-- 专业词先写入本期 `WHISPER_INITIAL_PROMPT` 后重跑 timing；仍不匹配时根据
-  `srt_data/srt_NN.json` 修正 cue，不改正确的屏幕文案。
-- 素材 URI 使用 `prompt_NN.txt` 注入的真实绝对 `file:` URI，不拼写虚构路径。
-- 新动画必须是时间 `t` 的纯函数。随机数在 Python 端用固定种子生成。
+分别说明源码/逻辑测试、当前安装、本地浏览器、GPU 编码、云端账户和人工观看的结果。合成夹具的来源记录只属于隔离测试，不是生产配音或识别准确度证书。Fish 原生时间戳的解析测试不能代替真实账户、中文内容及声线的验证。
 
-## 交付前检查
+READY 只表示当前产物的结构与来源通过，既不意味着人工观看，也不授予投稿权限。交付前应检查最终帧数、总时长和音视频起点，不以文件存在或两个同样截短的流代替完整交付。
 
-1. `build` 无未解析 cue。
-2. `lint` 无 HARD 错误。
-3. 人工打开 `output/preview.html`，逐场确认布局、节奏和素材。
-4. `render` 与 `merge` 成功且没有缺帧/短分片。
-5. `cover` 与 `chapters` 已按本期内容人工审阅。
-6. `verify` 输出 `[verify] READY`。
-7. 真实观看最终 MP4 后，才能报告“视频可投稿”。
-
-## 安全边界
-
-- Fish 密钥仅通过环境变量或被忽略的 `secret_local.py` 注入。
-- 不输出密钥，不把临时音频、素材、成片或缓存加入 Git。
-- 不擅自调用投稿、上传或其他外部发布能力。
+运行 cleanup 前可 dry-run；只处理明确的可再生中间文件，残留和失败必须报告，原件和未知文件不擅自处理。源码提交不得混入密钥、素材、配音、成片、临时目录或个人运行配置。

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>@@TITLE@@ · 音画审阅</title>
+<style>
+:root{color-scheme:dark;font:16px/1.5 system-ui,'Microsoft YaHei',sans-serif;background:#111714;color:#e2ebe5}
+*{box-sizing:border-box}body{margin:0}header{padding:20px 28px;border-bottom:1px solid #30443a;background:#19251f}
+h1{margin:0 0 4px;font-size:24px}p{margin:6px 0;color:#aabfb2}.layout{display:grid;grid-template-columns:240px 1fr;gap:24px;padding:24px}
+nav{display:flex;flex-direction:column;gap:8px}button,select,input{font:inherit}button,select{padding:8px 12px;border:1px solid #4b6958;border-radius:6px;background:#20352a;color:inherit}
+button{cursor:pointer}button:hover,button[aria-current=true]{background:#346448}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #b4e4c5}
+main{min-width:0}.frame{position:relative;aspect-ratio:16/9;width:100%;overflow:hidden;background:#eef5f0 url('_preview_bg.jpg') center/cover}
+iframe{position:absolute;left:0;top:0;width:3840px;height:2160px;border:0;transform-origin:top left;transform:scale(var(--scale,.25));background:transparent}
+.transport{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:16px 0}audio{width:min(100%,620px)}#scrub{flex:1;min-width:200px}.words{max-height:170px;overflow:auto;padding:12px;background:#19251f;border-radius:6px}
+.word{display:inline-block;border:0;background:transparent;padding:3px 4px}.word.active{background:#b4e4c5;color:#10291a}details{margin-top:18px;background:#19251f;padding:14px;border-radius:6px}.editor{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:16px 0}
+#message{white-space:pre-wrap;color:#d0eecb}label{display:flex;gap:6px;align-items:center}input[type=number]{width:88px;background:#111714;color:inherit;border:1px solid #4b6958;padding:6px}.note{font-size:14px}
+@media(max-width:800px){.layout{grid-template-columns:1fr;padding:14px}nav{flex-direction:row;overflow:auto}nav button{white-space:nowrap}}
+</style></head><body><header><h1>@@TITLE@@</h1><p>@@COUNT@@ 个场景 · @@TOTAL@@ 秒 · 配音驱动的布局与词级触发审阅</p></header>
+<div class="layout"><nav id="scenes" aria-label="选择场景"></nav><main>
+<div class="frame" id="frame"><iframe id="scene" title="场景动画"></iframe></div>
+<div class="transport"><audio id="audio" controls preload="metadata"></audio><label>时间 <input id="scrub" type="range" min="0" max="1" step="0.001" value="0"></label><output id="time">0.000</output></div>
+<div class="words" id="words" aria-label="点击词语跳转到对应时间"></div>
+<details><summary>调整触发词出现次数与偏移（导出片段，不覆盖原件）</summary>
+<div class="editor"><label>元素 <select id="cue"></select></label><label>第几次 <input id="occurrence" type="number" min="1" value="1"></label><label>偏移秒 <input id="offset" type="number" step="0.01" value="0"></label><button id="export">导出修改后的 SVG</button></div>
+<p class="note">下载后，将片段保存到对应的 fragment_NN.svg，再运行 build 和 preview。此处不修改旁白、识别结果或工程文件。</p><p id="message" role="status"></p>
+</details><p class="note">此预览使用真实配音和同一 seekTime 运行时，但不叠加最终转场、动态背景、胶片效果和背景音乐。审阅不能代替最终成片观看。暂停保留当前画面。</p>
+</main></div>
+<script type="application/json" id="project">@@DATA@@</script>
+<script>
+'use strict';
+const project=JSON.parse(document.getElementById('project').textContent);
+const byId=id=>document.getElementById(id),audio=byId('audio'),scene=byId('scene'),scrub=byId('scrub');
+let selected=0,wordButtons=[],fragmentDocument=null,cueNodes=[];
+function sync(){const t=Math.min(+scrub.max,Math.max(0,audio.currentTime||+scrub.value||0));scrub.value=t;byId('time').textContent=t.toFixed(3)+' / '+(+scrub.max).toFixed(3)+' s';scene.contentWindow.postMessage({type:'video-scaffold.seek',time:t},'*');wordButtons.forEach((button,i)=>button.classList.toggle('active',project.scenes[selected].words[i].start<=t&&project.scenes[selected].words[i].end>t));}
+function resize(){byId('frame').style.setProperty('--scale',byId('frame').clientWidth/3840);}
+new ResizeObserver(resize).observe(byId('frame'));
+function select(index){audio.pause();selected=index;const item=project.scenes[index];scene.src=item.scene;audio.src=item.audio||'';audio.hidden=!item.audio;audio.currentTime=0;scrub.max=item.duration;scrub.value=0;byId('words').replaceChildren();wordButtons=item.words.map(word=>{const button=document.createElement('button');button.type='button';button.className='word';button.textContent=word.word;button.title=word.start.toFixed(3)+'–'+word.end.toFixed(3)+' s';button.onclick=()=>{audio.currentTime=word.start;scrub.value=word.start;sync();};byId('words').append(button);return button;});
+  [...byId('scenes').children].forEach((button,i)=>button.setAttribute('aria-current',String(i===index)));
+  fragmentDocument=new DOMParser().parseFromString('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'+item.fragment+'</svg>','image/svg+xml');
+  cueNodes=[...fragmentDocument.querySelectorAll('[data-cue]')];byId('cue').replaceChildren();cueNodes.forEach((node,i)=>{const option=document.createElement('option');option.value=i;option.textContent=(i+1)+'. '+node.tagName+' · '+node.getAttribute('data-cue');byId('cue').append(option);});byId('export').disabled=!cueNodes.length;loadCue();sync();}
+function loadCue(){const node=cueNodes[+byId('cue').value];byId('occurrence').value=node?.getAttribute('data-cue-index')||1;byId('offset').value=node?.getAttribute('data-cue-offset')||0;byId('message').textContent='';}
+project.scenes.forEach((item,index)=>{const button=document.createElement('button');button.type='button';button.textContent='#'+String(item.id).padStart(2,'0')+' · '+item.name;button.onclick=()=>select(index);byId('scenes').append(button);});
+byId('cue').onchange=loadCue;scene.onload=sync;audio.ontimeupdate=sync;audio.onseeked=sync;audio.onpause=sync;audio.onloadedmetadata=sync;
+scrub.oninput=()=>{if(audio.src)audio.currentTime=+scrub.value;scene.contentWindow.postMessage({type:'video-scaffold.seek',time:+scrub.value},'*');byId('time').textContent=(+scrub.value).toFixed(3)+' s';};
+function tick(){if(!audio.paused)sync();requestAnimationFrame(tick);}requestAnimationFrame(tick);
+byId('export').onclick=()=>{const node=cueNodes[+byId('cue').value],count=+byId('occurrence').value,offset=+byId('offset').value;
+  if(!node||!Number.isInteger(count)||count<1||!Number.isFinite(offset)){byId('message').textContent='请输入有效的次数和偏移。';return;}
+  node.setAttribute('data-cue-index',String(count));node.setAttribute('data-cue-offset',String(offset));const serializer=new XMLSerializer();const text=[...fragmentDocument.documentElement.childNodes].map(n=>serializer.serializeToString(n)).join('');
+  const uri=URL.createObjectURL(new Blob([text],{type:'image/svg+xml;charset=utf-8'}));const a=document.createElement('a');a.href=uri;a.download='fragment_'+String(project.scenes[selected].id).padStart(2,'0')+'.svg';a.click();setTimeout(()=>URL.revokeObjectURL(uri),1000);byId('message').textContent='已导出片段。保存到工程后重跑 build，再重新生成预览；当前渲染产物尚未改变。';};
+if(project.scenes.length)select(0);
+</script></body></html>

@@ -87,6 +87,8 @@ DIMS = {}
 
 # ---- timing helper: cue first, data-delay fallback ------------------------
 def _t(cue, delay, dur=None):
+    import html
+    cue = html.escape(str(cue), quote=True) if cue else cue
     a = f'data-cue="{cue}" data-delay="{delay:.2f}"' if cue else f'data-delay="{delay:.2f}"'
     if dur is not None: a += f' data-dur="{dur}"'
     return a

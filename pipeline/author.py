@@ -72,8 +72,12 @@ def build_prompt(script_text, srt_path, asset_path=None):
 只输出 <svg id="stage"> 内部的片段内容，不要任何解释或代码块标记。"""
 
 
-def assemble_all(scripts_dir=config.DIR_SCRIPTS, srt_dir=config.DIR_SRT,
-                 assets=None, out_dir=config.DIR_SCENE):
+def assemble_all(
+    scripts_dir=config.DIR_SCRIPTS,
+    srt_dir=config.DIR_SRT,
+    assets=None,
+    out_dir=config.DIR_SCENE,
+):
     """Write scene_html/prompt_NN.txt for every script. Returns the prompt list."""
     scripts = indexed_files(os.path.join(scripts_dir, "script_*.txt"))
     assets = assets or sorted(glob.glob(os.path.join(config.DIR_ASSETS, "*.png")))
@@ -100,7 +104,9 @@ def assemble_all(scripts_dir=config.DIR_SCRIPTS, srt_dir=config.DIR_SRT,
     for output, prompt in prepared:
         with open(output, "w", encoding="utf-8") as f:
             f.write(prompt)
-    print(f"[author] assembled {len(prepared)} scene prompts -> {out_dir}/prompt_NN.txt")
+    print(
+        f"[author] assembled {len(prepared)} scene prompts -> {out_dir}/prompt_NN.txt"
+    )
     return [prompt for _output, prompt in prepared]
 
 

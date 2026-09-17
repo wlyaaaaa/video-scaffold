@@ -47,16 +47,68 @@ def slice_script(full_text, max_chars=120):
     return segments
 
 
-def write_scripts(segments, scripts_dir=config.DIR_SCRIPTS):
-    config.ensure_dirs()
-    paths = []
-    for i, seg in enumerate(segments, 1):
-        p = os.path.join(scripts_dir, f"script_{i:02d}.txt")
-        with open(p, "w", encoding="utf-8") as f:
-            f.write(seg.strip())
-        paths.append(p)
-    print(f"[prep] wrote {len(paths)} scripts")
-    return paths
+def write_scripts(segments, scripts_dir=None, *, mode="create"):
+    """create refuses existing numbered scripts; update preserves other scenes;
+    replace reconciles only files owned by the previous generated manifest.
+    """
+    from pathlib import Path
+    import json, tempfile
+    from pipeline.indexed_files import indexed_files
+    from pipeline.artifact_identity import read_record, sha256_file
+    from pipeline.io_utils import publish_bundle, atomic_json
+
+    if mode not in ("create", "update", "replace"):
+        raise ValueError("invalid script write mode")
+    if not segments or any(not isinstance(s, str) or not s.strip() for s in segments):
+        raise ValueError("scripts must be nonempty strings")
+    directory = Path(scripts_dir or config.DIR_SCRIPTS)
+    existing = indexed_files(str(directory / "script_*.txt"))
+    manifest = directory / ".generated-scripts.json"
+    previous = read_record(str(manifest)) or {"files": {}}
+    if mode == "create" and existing:
+        raise RuntimeError(
+            "scripts already exist; select update or owned replacement explicitly"
+        )
+    stale = []
+    if mode == "replace":
+        for path in existing.values():
+            name = Path(path).name
+            if previous.get("files", {}).get(name) != sha256_file(path):
+                raise RuntimeError(
+                    f"refusing to replace unowned or edited original: {name}"
+                )
+            if int(Path(path).stem.split("_")[-1]) > len(segments):
+                stale.append(Path(path))
+    directory.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".scripts-", dir=directory) as temporary:
+        staged = Path(temporary)
+        pairs = []
+        files = dict(previous.get("files", {})) if mode == "update" else {}
+        for index, text in enumerate(segments, 1):
+            name = f"script_{index:02d}.txt"
+            path = staged / name
+            path.write_text(text.strip(), encoding="utf-8")
+            files[name] = sha256_file(str(path))
+            pairs.append((path, directory / name))
+        atomic_json(
+            staged / "manifest.json",
+            {"schema": "video-scaffold.generated-scripts.v1", "files": files},
+        )
+        moved = []
+        try:
+            for path in stale:
+                backup = staged / (path.name + ".removed")
+                os.replace(path, backup)
+                moved.append((backup, path))
+            publish_bundle(pairs + [(staged / "manifest.json", manifest)])
+        except BaseException:
+            for backup, path in reversed(moved):
+                os.replace(backup, path)
+            raise
+    return [
+        str(directory / f"script_{index:02d}.txt")
+        for index in range(1, len(segments) + 1)
+    ]
 
 
 if __name__ == "__main__":

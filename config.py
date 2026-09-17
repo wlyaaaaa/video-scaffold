@@ -44,56 +44,80 @@ BG_VIDEO = _p("background", "background_4k.mp4")
 # Chunks ARE the final quality (concat is stream-copy), so invest here.
 # p6 + spatial/temporal AQ + lookahead = near-transparent 4K at a small size.
 VCODEC = "av1_nvenc"
-CQ = "22"                 # constant quality; lower = better/bigger (18-24 sane)
-NVENC_EXTRA = ["-preset", "p6", "-tune", "hq", "-rc", "constqp",
-               "-spatial-aq", "1", "-temporal-aq", "1", "-rc-lookahead", "32",
-               "-pix_fmt", "yuv420p10le"]
+CQ = "22"  # constant quality; lower = better/bigger (18-24 sane)
+NVENC_EXTRA = [
+    "-preset",
+    "p6",
+    "-tune",
+    "hq",
+    "-rc",
+    "constqp",
+    "-spatial-aq",
+    "1",
+    "-temporal-aq",
+    "1",
+    "-rc-lookahead",
+    "32",
+    "-pix_fmt",
+    "yuv420p10le",
+]
 NUM_WORKERS = int(os.environ.get("VIDEO_RENDER_WORKERS", "4"))
-                          # 4 is the verified conservative default; override
-                          # only after a local doctor/render acceptance.
-                          # encode-session cap; 8 contended and silently dropped
-                          # frames (the 3:47 desync). render.py now also verifies
-                          # each chunk's frame count, so a drop fails loud, not silent.
-CHUNK_FRAMES = 300        # max frames per ffmpeg chunk (5 s @ 60fps); the
-                          # renderer shrinks this so short videos still use all cores
+# 4 is the verified conservative default; override
+# only after a local doctor/render acceptance.
+# encode-session cap; 8 contended and silently dropped
+# frames (the 3:47 desync). render.py now also verifies
+# each chunk's frame count, so a drop fails loud, not silent.
+CHUNK_FRAMES = 300  # max frames per ffmpeg chunk (5 s @ 60fps); the
+# renderer shrinks this so short videos still use all cores
 # Each worker keeps at most this many scene pages warm (LRU). Caps memory at
 # O(workers x MAX_PAGES) instead of O(workers x scenes) - the old all-scenes
 # preload was the OOM driver that capped the pool at ~5 workers.
 MAX_PAGES_PER_WORKER = 6
-CHUNK_RETRIES = 2         # re-attempt a chunk's ffmpeg on transient failure
-SCREENSHOT_FAST = True    # CDP optimizeForSpeed PNG (faster encode + decode)
+CHUNK_RETRIES = 2  # re-attempt a chunk's ffmpeg on transient failure
+SCREENSHOT_FAST = True  # CDP optimizeForSpeed PNG (faster encode + decode)
 
 # --- design system (the global visual contract) -----------------------------
 # Dark celadon text on transparent foreground; no cards/borders/shadows.
-INK = "#0C2B1B"           # 深黛绿 primary text
-ACCENT = "#1F7A4D"        # 流光浅绿 accent for lines / arrows
-FADE_SECONDS = 0.5        # per-scene fade in / out
+INK = "#0C2B1B"  # 深黛绿 primary text
+ACCENT = "#1F7A4D"  # 流光浅绿 accent for lines / arrows
+FADE_SECONDS = 0.5  # per-scene fade in / out
 
 # --- scene transitions ------------------------------------------------------
 # How one scene leaves and the next enters (motion + cross-dissolve through bg).
-TRANSITION = "rise"       # fade | rise | slide-left | slide-right | zoom
+TRANSITION = "rise"  # fade | rise | slide-left | slide-right | zoom
 TRANSITION_SECONDS = 0.5
-TRANSITION_SHIFT = 80     # px of travel for rise/slide at 4K
+TRANSITION_SHIFT = 80  # px of travel for rise/slide at 4K
 
 # --- cinematic finishing (baked per-chunk during render) --------------------
 CINEMATIC = True
-VIGNETTE_ANGLE = 0.55     # radians; 0 disables. Gentle corner falloff.
-GRAIN = 4                 # temporal film grain strength; 0 disables.
+VIGNETTE_ANGLE = 0.55  # radians; 0 disables. Gentle corner falloff.
+GRAIN = 4  # temporal film grain strength; 0 disables.
 
 # --- background music (YOU supply the file) ---------------------------------
 # Drop any audio at BGM_PATH; merge ducks it under the narration automatically.
 BGM_PATH = _p("bgm.mp3")  # optional; merge loops it under narration
-BGM_VOLUME = 0.34         # base level before narration-driven sidechain ducking
+BGM_VOLUME = 0.34  # base level before narration-driven sidechain ducking
 
 # --- Fish Audio TTS ---------------------------------------------------------
 # SECURITY: the key is read from env var FISH_API_KEY, or secret_local.py
 # (git-ignored). Never hard-code it here - this file is committed to GitHub.
 FISH_API_KEY = os.getenv("FISH_API_KEY", "")
-try:
-    from secret_local import FISH_API_KEY as _LOCAL_KEY  # git-ignored file
-    FISH_API_KEY = _LOCAL_KEY or FISH_API_KEY
-except Exception:
-    pass
+
+
+def get_fish_api_key():
+    """Resolve only when an explicitly requested TTS/config probe needs a key.
+
+    Preserve the existing nonempty-local-value priority; an empty local stub
+    does not erase an environment key. Never print the returned value.
+    """
+    try:
+        from secret_local import FISH_API_KEY as local_key
+    except ModuleNotFoundError as error:
+        if error.name != "secret_local":
+            raise
+        local_key = ""
+    return local_key or FISH_API_KEY
+
 
 FISH_ENDPOINT = "https://api.fish.audio/v1/tts"
 # 云飞旁白声线。Keep model + reference ID together as the single source of
@@ -111,15 +135,35 @@ SCENE_TAIL_SILENCE = 0.2
 # Fish inline markup the AI may sprinkle into scripts for delivery/SFX.
 # Emotion tones wrap the phrase that should carry the emotion; SFX/pauses are
 # inserted at the point they occur. See docs/VOICE.md.
-FISH_EMOTION_TAGS = ["angry", "sad", "embarrassed", "emphasis", "whispering",
-                     "soft", "breathy", "excited"]
-FISH_SFX_TAGS = ["laughing", "chuckling", "moaning", "clear throat", "sobbing",
-                 "crying loudly", "sighing", "panting", "groaning",
-                 "crowd laughing", "background laughter", "audience laughing",
-                 "pause", "long pause"]
+FISH_EMOTION_TAGS = [
+    "angry",
+    "sad",
+    "embarrassed",
+    "emphasis",
+    "whispering",
+    "soft",
+    "breathy",
+    "excited",
+]
+FISH_SFX_TAGS = [
+    "laughing",
+    "chuckling",
+    "moaning",
+    "clear throat",
+    "sobbing",
+    "crying loudly",
+    "sighing",
+    "panting",
+    "groaning",
+    "crowd laughing",
+    "background laughter",
+    "audience laughing",
+    "pause",
+    "long pause",
+]
 
 # --- faster-whisper (best local quality, max GPU/CPU utilisation) -----------
-WHISPER_MODEL = "large-v3"   # best accuracy
+WHISPER_MODEL = "large-v3"  # best accuracy
 WHISPER_DEVICE = "cuda"
 WHISPER_COMPUTE = "float16"  # modern NVIDIA GPUs keep quality high
 WHISPER_LANGUAGE = "zh"
@@ -135,8 +179,8 @@ WHISPER_INITIAL_PROMPT = os.environ.get("WHISPER_INITIAL_PROMPT", "")
 #   2. AS SHORT as possible - 4-6 CJK chars; AI summarises the narration into a
 #      glanceable phrase, not a sentence. Warn past CHAPTER_TITLE_MAXLEN.
 CHAPTER_MAX = 10
-CHAPTER_TITLE_MAXLEN = 6   # CJK=1, latin/digit≈0.6; warn above (ideal 4-5)
-CHAPTER_MIN_GAP = 5        # adjacent chapters closer than this (s) -> warn (Bilibili)
+CHAPTER_TITLE_MAXLEN = 6  # CJK=1, latin/digit≈0.6; warn above (ideal 4-5)
+CHAPTER_MIN_GAP = 5  # adjacent chapters closer than this (s) -> warn (Bilibili)
 
 # --- directories ------------------------------------------------------------
 DIR_ASSETS = _p("assets")
@@ -152,6 +196,44 @@ TEMPLATE_COVER = _p("templates", "cover_base.html")
 
 
 def ensure_dirs():
-    for d in (DIR_ASSETS, DIR_SCRIPTS, DIR_AUDIO, DIR_SRT,
-              DIR_SCENE, DIR_RENDERED, DIR_OUTPUT):
+    for d in (
+        DIR_ASSETS,
+        DIR_SCRIPTS,
+        DIR_AUDIO,
+        DIR_SRT,
+        DIR_SCENE,
+        DIR_RENDERED,
+        DIR_OUTPUT,
+    ):
         os.makedirs(d, exist_ok=True)
+
+
+# Runtime adapters are opt-in machine configuration, never copied credentials.
+GPU_BROKER_URL = os.environ.get("VIDEO_GPU_BROKER_URL", "")
+GPU_LEASE_SECONDS = 120
+WORKER_TIMEOUT_SECONDS = 900
+PROCESS_TIMEOUT_SECONDS = 180
+TIMING_SOURCE = os.environ.get("VIDEO_TIMING_SOURCE", "whisper")
+if TIMING_SOURCE not in ("whisper", "fish"):
+    raise ValueError("VIDEO_TIMING_SOURCE must be whisper or fish")
+# CPU profile is explicit for portable validation, never a silent GPU fallback.
+if os.environ.get("VIDEO_ENCODER_PROFILE") == "cpu-h264":
+    VCODEC = "libx264"
+    NVENC_EXTRA = ["-preset", "ultrafast", "-pix_fmt", "yuv420p"]
+if NUM_WORKERS < 1:
+    raise ValueError("VIDEO_RENDER_WORKERS must be positive")
+
+_MACHINE_PROFILE = _p(".video-machine.json")
+if os.path.isfile(_MACHINE_PROFILE):
+    import json as _json
+
+    with open(_MACHINE_PROFILE, encoding="utf-8") as _machine_file:
+        _machine = _json.load(_machine_file)
+    GPU_BROKER_URL = os.environ.get(
+        "VIDEO_GPU_BROKER_URL", _machine.get("gpu_broker_url", "")
+    )
+    for _tool_key in ("ffmpeg_directory",):
+        if _machine.get(_tool_key):
+            os.environ["PATH"] = (
+                _machine[_tool_key] + os.pathsep + os.environ.get("PATH", "")
+            )

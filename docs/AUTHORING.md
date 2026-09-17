@@ -54,7 +54,7 @@ AI 或人工审阅结果后，只把片段保存为 `scene_html/fragment_NN.svg`
 
 ## Cue 与时间轴
 
-使用 `data-cue="旁白里的原词"`，构建时会从 `srt_data/srt_NN.json` 查到精确开始秒并
+使用 `data-cue="旁白里的原词"`，构建时会从 `srt_data/srt_NN.json` 查到估计的开始时间并
 替换为 `data-delay`：
 
 ```svg
@@ -108,3 +108,7 @@ pwsh -File .\run.ps1 preview
 
 `build` 必须通过，`lint` 必须没有 HARD 项，然后人工打开 `output/preview.html` 逐场检查。
 满意后才运行 `render`。最终仍需 `verify`，预览通过不能替代成片验收。
+
+## 当前审阅入口
+
+有声预览、重复 cue 次数、偏移、片段导出及验收边界见 WORKFLOW.md。data-cue-index 选择第几次出现，data-cue-offset 调整相对偏移。单引号和双引号均支持，重复属性拒绝，解析成功后只保留唯一生效延时。词级时间及词内插值不是逐音素真值，必须结合实际音频审阅。

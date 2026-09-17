@@ -36,11 +36,20 @@ def read_record(path: str) -> dict[str, Any] | None:
 
 
 def write_record(path: str, value: dict[str, Any]) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    temporary = f"{path}.{os.getpid()}.tmp"
+    import uuid
+
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    temporary = f"{path}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
     try:
         with open(temporary, "w", encoding="utf-8", newline="\n") as target:
-            json.dump(value, target, ensure_ascii=False, indent=2, sort_keys=True)
+            json.dump(
+                value,
+                target,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
             target.write("\n")
         os.replace(temporary, path)
     finally:
@@ -51,7 +60,9 @@ def write_record(path: str, value: dict[str, Any]) -> None:
             pass
 
 
-def output_record_matches(path: str, expected: dict[str, Any], output_path: str) -> bool:
+def output_record_matches(
+    path: str, expected: dict[str, Any], output_path: str
+) -> bool:
     if not os.path.isfile(output_path) or os.path.getsize(output_path) <= 0:
         return False
     actual = read_record(path)

@@ -60,7 +60,12 @@ class DeliveryVerificationTests(unittest.TestCase):
             return {
                 "format": {"duration": None},
                 "streams": [
-                    {"codec_type": "video", "codec_name": "png", "width": 3840, "height": 2160}
+                    {
+                        "codec_type": "video",
+                        "codec_name": "png",
+                        "width": 3840,
+                        "height": 2160,
+                    }
                 ],
             }
         return {
@@ -78,7 +83,7 @@ class DeliveryVerificationTests(unittest.TestCase):
             ],
         }
 
-    def test_verify_accepts_a_complete_bilibili_delivery(self) -> None:
+    def test_verify_rejects_unbound_media_even_when_probe_looks_complete(self) -> None:
         from pipeline import cleanup
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -87,9 +92,11 @@ class DeliveryVerificationTests(unittest.TestCase):
                 mock.patch.object(cleanup.config, "DIR_OUTPUT", str(output)),
                 mock.patch.object(cleanup.config, "DIR_SCENE", str(scenes)),
                 mock.patch.object(cleanup.config, "PROJECT_TITLE", "Ready Video"),
-                mock.patch.object(cleanup, "_ffprobe", side_effect=self._valid_probe, create=True),
+                mock.patch.object(
+                    cleanup, "_ffprobe", side_effect=self._valid_probe, create=True
+                ),
             ):
-                self.assertTrue(cleanup.verify())
+                self.assertFalse(cleanup.verify())
 
     def test_verify_rejects_an_untitled_delivery(self) -> None:
         from pipeline import cleanup
@@ -100,7 +107,9 @@ class DeliveryVerificationTests(unittest.TestCase):
                 mock.patch.object(cleanup.config, "DIR_OUTPUT", str(output)),
                 mock.patch.object(cleanup.config, "DIR_SCENE", str(scenes)),
                 mock.patch.object(cleanup.config, "PROJECT_TITLE", "Untitled Video"),
-                mock.patch.object(cleanup, "_ffprobe", side_effect=self._valid_probe, create=True),
+                mock.patch.object(
+                    cleanup, "_ffprobe", side_effect=self._valid_probe, create=True
+                ),
             ):
                 self.assertFalse(cleanup.verify())
 
@@ -119,7 +128,9 @@ class DeliveryVerificationTests(unittest.TestCase):
                 mock.patch.object(cleanup.config, "DIR_OUTPUT", str(output)),
                 mock.patch.object(cleanup.config, "DIR_SCENE", str(scenes)),
                 mock.patch.object(cleanup.config, "PROJECT_TITLE", "Ready Video"),
-                mock.patch.object(cleanup, "_ffprobe", side_effect=no_audio, create=True),
+                mock.patch.object(
+                    cleanup, "_ffprobe", side_effect=no_audio, create=True
+                ),
             ):
                 self.assertFalse(cleanup.verify())
 
@@ -135,7 +146,9 @@ class DeliveryVerificationTests(unittest.TestCase):
                 mock.patch.object(cleanup.config, "DIR_OUTPUT", str(output)),
                 mock.patch.object(cleanup.config, "DIR_SCENE", str(scenes)),
                 mock.patch.object(cleanup.config, "PROJECT_TITLE", "Ready Video"),
-                mock.patch.object(cleanup, "_ffprobe", side_effect=self._valid_probe, create=True),
+                mock.patch.object(
+                    cleanup, "_ffprobe", side_effect=self._valid_probe, create=True
+                ),
             ):
                 self.assertFalse(cleanup.verify())
 
@@ -222,7 +235,9 @@ class GenericProjectTests(unittest.TestCase):
             asset = Path(temporary) / "hero image.png"
             asset.write_bytes(b"png")
 
-            prompt = build_prompt("旁白", str(Path(temporary) / "missing.json"), str(asset))
+            prompt = build_prompt(
+                "旁白", str(Path(temporary) / "missing.json"), str(asset)
+            )
 
             self.assertIn(asset.resolve().as_uri(), prompt)
             self.assertNotIn("file:///绝对路径", prompt)
@@ -312,7 +327,9 @@ class GenericProjectTests(unittest.TestCase):
             )
 
             self.assertFalse((prompts / "prompt_02.txt").exists())
-            self.assertEqual("keep noncanonical", noncanonical.read_text(encoding="utf-8"))
+            self.assertEqual(
+                "keep noncanonical", noncanonical.read_text(encoding="utf-8")
+            )
             self.assertEqual("keep unrelated", unrelated.read_text(encoding="utf-8"))
 
     def test_numeric_order_is_shared_by_pipeline_consumers(self) -> None:
@@ -334,7 +351,13 @@ class GenericProjectTests(unittest.TestCase):
                 )
                 (audio / f"audio_{index}.mp3").write_bytes(str(index).encode("ascii"))
 
-            with mock.patch.object(fish_tts, "synth_one", return_value=True) as synth:
+            with mock.patch.object(
+                fish_tts,
+                "synth_one",
+                side_effect=lambda text, path, **kwargs: (
+                    Path(path).write_bytes(b"fixture-audio") or True
+                ),
+            ) as synth:
                 tts_outputs = fish_tts.synth_batch(str(scripts), str(audio), force=True)
             self.assertEqual(
                 ["audio_99.mp3", "audio_100.mp3"],
@@ -373,19 +396,28 @@ class GenericProjectTests(unittest.TestCase):
 
             captured = {}
 
-            def capture_concat(command, check):
+            def capture_concat(command, **kwargs):
                 list_path = Path(command[command.index("-i") + 1])
                 captured["list"] = list_path.read_text(encoding="utf-8")
+                Path(command[-1]).write_bytes(b"fixture-merged")
                 return mock.Mock(returncode=0)
 
             with (
                 mock.patch.object(merge.config, "DIR_OUTPUT", str(output)),
-                mock.patch.object(merge.subprocess, "run", side_effect=capture_concat),
+                mock.patch.object(merge, "run", side_effect=capture_concat),
+                mock.patch.object(merge, "_probe_seconds", return_value=1.0),
+                mock.patch.object(
+                    merge,
+                    "_normalize_audio",
+                    side_effect=lambda source, target, seconds: Path(
+                        target
+                    ).write_bytes(b"pcm"),
+                ),
             ):
                 merge.concat_audio(str(audio), str(output / "_main_audio.mp3"))
             self.assertLess(
-                captured["list"].index("audio_99.mp3"),
-                captured["list"].index("audio_100.mp3"),
+                captured["list"].index("audio_99.wav"),
+                captured["list"].index("audio_100.wav"),
             )
             self.assertEqual(
                 [99, 100],
@@ -409,16 +441,20 @@ class GenericProjectTests(unittest.TestCase):
             with (
                 mock.patch.object(preview.config, "DIR_SCENE", str(scenes)),
                 mock.patch.object(preview.config, "DIR_OUTPUT", str(output)),
-                mock.patch.object(preview.config, "DURATIONS_JSON", str(durations_path)),
+                mock.patch.object(
+                    preview.config, "DURATIONS_JSON", str(durations_path)
+                ),
                 mock.patch.object(preview.config, "PROJECT_TITLE", "Numeric Preview"),
-                mock.patch.object(preview, "PREVIEW_BG", str(output / "_preview_bg.jpg")),
+                mock.patch.object(
+                    preview, "PREVIEW_BG", str(output / "_preview_bg.jpg")
+                ),
                 mock.patch.object(preview, "_ensure_bg", return_value=None),
             ):
                 preview.build(out=str(out))
 
             html = out.read_text(encoding="utf-8")
-            scene_99 = 'scene_99.html?dur=99.000'
-            scene_100 = 'scene_100.html?dur=100.000'
+            scene_99 = "scene_99.html?preview=1"
+            scene_100 = "scene_100.html?preview=1"
             self.assertIn(scene_99, html)
             self.assertIn(scene_100, html)
             self.assertLess(html.index(scene_99), html.index(scene_100))
@@ -454,13 +490,17 @@ class GenericProjectTests(unittest.TestCase):
                 mock.patch.object(preview.config, "DIR_OUTPUT", str(output)),
                 mock.patch.object(preview.config, "DIR_SCENE", str(scenes)),
                 mock.patch.object(preview.config, "DURATIONS_JSON", str(durations)),
-                mock.patch.object(preview.config, "PROJECT_TITLE", "Workflow Acceptance", create=True),
-                mock.patch.object(preview, "PREVIEW_BG", str(output / "_preview_bg.jpg")),
+                mock.patch.object(
+                    preview.config, "PROJECT_TITLE", "Workflow Acceptance", create=True
+                ),
+                mock.patch.object(
+                    preview, "PREVIEW_BG", str(output / "_preview_bg.jpg")
+                ),
                 mock.patch.object(preview, "_ensure_bg", return_value=None),
             ):
                 preview.build(out=str(out))
             html = out.read_text(encoding="utf-8")
-            self.assertIn("Workflow Acceptance · 全场景动态预览", html)
+            self.assertIn("Workflow Acceptance · 音画审阅", html)
             self.assertNotIn("游戏王MD氪金指南", html)
 
     def test_init_project_copies_runtime_entry_and_component_library(self) -> None:
@@ -480,8 +520,12 @@ class GenericProjectTests(unittest.TestCase):
             next_steps = output.getvalue()
             self.assertIn(r"next: run: pwsh -File .\run.ps1 test", next_steps)
             self.assertIn(r"then: run: pwsh -File .\run.ps1 doctor", next_steps)
-            self.assertLess(next_steps.index("run.ps1 test"), next_steps.index("doctor-live"))
-            self.assertLess(next_steps.index("run.ps1 doctor"), next_steps.index("doctor-live"))
+            self.assertLess(
+                next_steps.index("run.ps1 test"), next_steps.index("doctor-live")
+            )
+            self.assertLess(
+                next_steps.index("run.ps1 doctor"), next_steps.index("doctor-live")
+            )
 
     def test_active_guides_have_no_retired_root_path(self) -> None:
         for relative in ("README.md", "docs/AI_GUIDE.md", "docs/AUTHORING.md"):
@@ -492,8 +536,13 @@ class GenericProjectTests(unittest.TestCase):
     def test_config_defaults_are_topic_neutral(self) -> None:
         import config
 
-        self.assertEqual(os.environ.get("VIDEO_PROJECT_TITLE", "Untitled Video"), config.PROJECT_TITLE)
-        self.assertEqual(os.environ.get("WHISPER_INITIAL_PROMPT", ""), config.WHISPER_INITIAL_PROMPT)
+        self.assertEqual(
+            os.environ.get("VIDEO_PROJECT_TITLE", "Untitled Video"),
+            config.PROJECT_TITLE,
+        )
+        self.assertEqual(
+            os.environ.get("WHISPER_INITIAL_PROMPT", ""), config.WHISPER_INITIAL_PROMPT
+        )
 
     def test_doctor_module_exposes_local_preflight(self) -> None:
         from pipeline import doctor
@@ -509,14 +558,18 @@ class GenericProjectTests(unittest.TestCase):
         )
         with (
             mock.patch.object(doctor, "_run", return_value=completed),
-            mock.patch.object(doctor, "_gpu_memory_detail", return_value="1252 MiB free"),
+            mock.patch.object(
+                doctor, "_gpu_memory_detail", return_value="1252 MiB free"
+            ),
         ):
             check = doctor._nvenc_check()
 
         self.assertEqual("BUSY", check.status)
         self.assertIn("1252 MiB free", check.detail)
 
-    def test_tts_reuse_requires_matching_script_and_configuration_identity(self) -> None:
+    def test_tts_reuse_requires_matching_script_and_configuration_identity(
+        self,
+    ) -> None:
         from pipeline import fish_tts
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -551,7 +604,9 @@ class GenericProjectTests(unittest.TestCase):
             ):
                 fish_tts.synth_batch(str(scripts), str(audio), force=True)
 
-            with mock.patch.object(fish_tts, "synth_one", side_effect=synthesize) as synth:
+            with mock.patch.object(
+                fish_tts, "synth_one", side_effect=synthesize
+            ) as synth:
                 fish_tts.synth_batch(str(scripts), str(audio), force=True)
             synth.assert_called_once()
 
@@ -571,7 +626,9 @@ class GenericProjectTests(unittest.TestCase):
                 Path(out_path).write_text("[]", encoding="utf-8")
                 return []
 
-            with mock.patch.object(transcribe, "transcribe_one", side_effect=transcribe_audio):
+            with mock.patch.object(
+                transcribe, "transcribe_one", side_effect=transcribe_audio
+            ):
                 transcribe.transcribe_batch(str(audio), str(timelines), force=True)
 
             with mock.patch.object(transcribe, "transcribe_one") as transcribe_one:
@@ -579,14 +636,20 @@ class GenericProjectTests(unittest.TestCase):
                 transcribe_one.assert_not_called()
 
             (audio / "audio_01.mp3").write_bytes(b"changed audio")
-            with self.assertRaisesRegex(RuntimeError, "refusing stale word timing reuse"):
+            with self.assertRaisesRegex(
+                RuntimeError, "refusing stale word timing reuse"
+            ):
                 transcribe.transcribe_batch(str(audio), str(timelines))
 
-            with mock.patch.object(transcribe, "transcribe_one", side_effect=transcribe_audio) as transcribe_one:
+            with mock.patch.object(
+                transcribe, "transcribe_one", side_effect=transcribe_audio
+            ) as transcribe_one:
                 transcribe.transcribe_batch(str(audio), str(timelines), force=True)
                 transcribe_one.assert_called_once()
 
-    def test_render_resume_identity_discards_only_chunks_from_changed_inputs(self) -> None:
+    def test_render_resume_identity_discards_only_chunks_from_changed_inputs(
+        self,
+    ) -> None:
         from pipeline import render
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -614,10 +677,16 @@ class GenericProjectTests(unittest.TestCase):
 
                 chunk.write_bytes(b"locked stale chunk")
                 scene.write_text("<html>scene-v3</html>", encoding="utf-8")
-                changed_again = render._render_identity_record([str(scene)], [2.0], 120, 120)
+                changed_again = render._render_identity_record(
+                    [str(scene)], [2.0], 120, 120
+                )
                 with (
-                    mock.patch.object(render.os, "remove", side_effect=PermissionError("locked")),
-                    self.assertRaisesRegex(RuntimeError, "stale resume chunks could not be removed"),
+                    mock.patch.object(
+                        render.os, "remove", side_effect=PermissionError("locked")
+                    ),
+                    self.assertRaisesRegex(
+                        RuntimeError, "stale resume chunks could not be removed"
+                    ),
                 ):
                     render._prepare_resume(changed_again, str(output))
 
@@ -649,8 +718,13 @@ class GenericProjectTests(unittest.TestCase):
                 self.assertTrue(render._prepare_resume(changed, str(output)))
                 self.assertFalse(chunk.exists())
 
-                scene.write_text('<html><image href="file:///Z:/missing.png"></html>', encoding="utf-8")
-                with self.assertRaisesRegex(FileNotFoundError, "scene file resource is missing"):
+                scene.write_text(
+                    '<html><image href="file:///Z:/missing.png"></html>',
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(
+                    FileNotFoundError, "scene file resource is missing"
+                ):
                     render._render_identity_record([str(scene)], [2.0], 120, 120)
 
     def test_duration_identity_blocks_later_stages_after_audio_changes(self) -> None:
@@ -668,11 +742,15 @@ class GenericProjectTests(unittest.TestCase):
 
             with (
                 mock.patch.object(workflow.config, "DIR_AUDIO", str(audio)),
-                mock.patch.object(workflow.config, "DURATIONS_JSON", str(duration_path)),
+                mock.patch.object(
+                    workflow.config, "DURATIONS_JSON", str(duration_path)
+                ),
             ):
                 self.assertEqual([2.5], workflow._load_durations(1))
                 clip.write_bytes(b"audio-v2")
-                with self.assertRaisesRegex(RuntimeError, "does not match the current narration audio"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "does not match the current narration audio"
+                ):
                     workflow._load_durations(1)
 
     def test_legacy_builder_cannot_bypass_artifact_identity_checks(self) -> None:
@@ -691,8 +769,18 @@ class GenericProjectTests(unittest.TestCase):
         from pipeline import workflow
 
         expected = {
-            "tts", "timing", "prompts", "build", "lint", "preview",
-            "render", "merge", "cover", "chapters", "verify", "cleanup",
+            "tts",
+            "timing",
+            "prompts",
+            "build",
+            "lint",
+            "preview",
+            "render",
+            "merge",
+            "cover",
+            "chapters",
+            "verify",
+            "cleanup",
         }
         self.assertTrue(expected.issubset(workflow.STAGES))
 
@@ -720,6 +808,15 @@ class GenericProjectTests(unittest.TestCase):
                 mock.patch.object(workflow.config, "DIR_SCRIPTS", str(scripts)),
                 mock.patch.object(workflow.config, "DIR_SCENE", str(scenes)),
                 mock.patch.object(workflow.config, "DIR_SRT", str(timelines)),
+                mock.patch.object(
+                    workflow.contracts,
+                    "require_timings",
+                    return_value=(
+                        {1: "fixture.mp3"},
+                        {1: str(timelines / "srt_01.json")},
+                        [2.0],
+                    ),
+                ),
             ):
                 self.assertTrue(workflow.stage_build())
 
@@ -744,10 +841,12 @@ class GenericProjectTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "chapters.json"
             path.write_text(
-                json.dumps([
-                    {"scene": 2, "title": "第二段"},
-                    {"scene": 1, "title": "开场"},
-                ]),
+                json.dumps(
+                    [
+                        {"scene": 2, "title": "第二段"},
+                        {"scene": 1, "title": "开场"},
+                    ]
+                ),
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(RuntimeError, "start at scene 1"):
@@ -762,6 +861,14 @@ class GenericProjectTests(unittest.TestCase):
             with (
                 mock.patch.object(workflow.config, "DIR_OUTPUT", str(output)),
                 mock.patch.object(workflow.merge, "concat_audio", return_value=None),
+                mock.patch.object(
+                    workflow.contracts,
+                    "require_video",
+                    return_value=("video", [1.0], {}),
+                ),
+                mock.patch.object(
+                    workflow.contracts, "final_expected", return_value={}
+                ),
             ):
                 with self.assertRaisesRegex(RuntimeError, "narration audio is missing"):
                     workflow.stage_merge()

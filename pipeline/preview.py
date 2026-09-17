@@ -1,133 +1,109 @@
-# -*- coding: utf-8 -*-
-"""
-Stage 3.5 (optional) - in-browser dynamic preview of EVERY scene before rendering.
+"""Generate an audio-synchronized cue review page; no server is started implicitly."""
 
-Generates output/preview.html: a responsive grid where each scene_NN.html is
-embedded in a down-scaled iframe and animates itself on a loop (the scene runtime
-self-drives when opened with ?dur=SECONDS - see templates/scene_base.html). Each
-cell sits on a still grabbed from the real 4K background, so what you see is what
-you will render - just looping and without audio.
-
-Why this exists: the expensive step is the multi-minute NVENC render. This lets
-you catch a mis-placed element / overflow / bad cue in 5 seconds in a browser
-first. Open output/preview.html (double-click) - no server needed; every iframe
-drives its own timeline, so file:// cross-origin rules never get in the way.
-
-Public entry:  build(names=None) -> output/preview.html
-"""
-
-import os
-import sys
+import html
 import json
-import subprocess
-import html as html_lib
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import os
+from pathlib import Path
 import config
 from pipeline.indexed_files import indexed_files
+from pipeline.artifact_identity import (
+    output_record_matches,
+    write_output_record,
+    sha256_file,
+)
+from pipeline.io_utils import atomic_output, atomic_text, positive, run
 
 PREVIEW_HTML = os.path.join(config.DIR_OUTPUT, "preview.html")
 PREVIEW_BG = os.path.join(config.DIR_OUTPUT, "_preview_bg.jpg")
 
 
 def _ensure_bg():
-    """One still from the looping background, so cells look like the final frame."""
-    if os.path.exists(PREVIEW_BG):
+    if not os.path.isfile(config.BG_VIDEO):
+        raise FileNotFoundError("preview background missing")
+    expected = {
+        "schema": "video-scaffold.preview-background.v1",
+        "background_sha256": sha256_file(config.BG_VIDEO),
+    }
+    if output_record_matches(PREVIEW_BG + ".identity.json", expected, PREVIEW_BG):
         return
-    if not os.path.exists(config.BG_VIDEO):
-        return
-    subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", config.BG_VIDEO, "-frames:v", "1", PREVIEW_BG], check=True)
+    with atomic_output(PREVIEW_BG) as staged:
+        run(
+            [
+                "ffmpeg",
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                config.BG_VIDEO,
+                "-frames:v",
+                "1",
+                staged,
+            ]
+        )
+    write_output_record(PREVIEW_BG + ".identity.json", expected, PREVIEW_BG)
 
 
-def _fmt(t):
-    m, s = divmod(int(round(t)), 60)
-    return f"{m:02d}:{s:02d}"
-
-
-def build(names=None, out=PREVIEW_HTML):
-    config.ensure_dirs()
+def build(names=None, out=None):
+    out = out or os.path.join(config.DIR_OUTPUT, "preview.html")
+    with open(config.DURATIONS_JSON, encoding="utf-8") as source:
+        values = json.load(source)
+    scenes = indexed_files(os.path.join(config.DIR_SCENE, "scene_*.html"))
+    if not scenes or len(scenes) != len(values):
+        raise RuntimeError("preview scene/duration count mismatch")
+    values = [positive(value, "scene duration") for value in values]
+    # Validate all inputs before generating or replacing preview files.
+    rows = []
+    for position, ((index, path), duration) in enumerate(zip(scenes.items(), values)):
+        audio = Path(config.DIR_AUDIO) / f"audio_{index:02d}.mp3"
+        words = Path(config.DIR_SRT) / f"srt_{index:02d}.json"
+        fragment = Path(config.DIR_SCENE) / f"fragment_{index:02d}.svg"
+        relative = lambda target: os.path.relpath(target, Path(out).parent).replace(
+            "\\", "/"
+        )
+        rows.append(
+            {
+                "id": index,
+                "name": names[position]
+                if names and position < len(names)
+                else f"scene_{index:02d}",
+                "duration": duration,
+                "scene": relative(path) + "?preview=1",
+                "audio": relative(audio) if audio.is_file() else None,
+                "words": json.loads(words.read_text(encoding="utf-8"))
+                if words.is_file()
+                else [],
+                "fragment": fragment.read_text(encoding="utf-8")
+                if fragment.is_file()
+                else "",
+            }
+        )
     _ensure_bg()
-    with open(config.DURATIONS_JSON, "r", encoding="utf-8") as f:
-        durs = json.load(f)
-    scene_map = indexed_files(os.path.join(config.DIR_SCENE, "scene_*.html"))
-    if not scene_map:
-        print("[preview] no scenes built yet"); return None
-    scenes = list(scene_map.items())
-    n = min(len(scenes), len(durs))
-    total = sum(durs[:n])
-    has_bg = os.path.exists(PREVIEW_BG)
+    template = (Path(config.ROOT) / "templates" / "preview.html").read_text(
+        encoding="utf-8"
+    )
+    data = json.dumps({"scenes": rows}, ensure_ascii=False, allow_nan=False).replace(
+        "<", "\\u003c"
+    )
+    values = {
+        "@@TITLE@@": html.escape(str(config.PROJECT_TITLE)),
+        "@@COUNT@@": str(len(rows)),
+        "@@TOTAL@@": f"{sum(values):.3f}",
+        "@@DATA@@": data,
+    }
+    import re
 
-    cards, acc = [], 0.0
-    for i, (index, scene) in enumerate(scenes[:n]):
-        rel = os.path.relpath(scene, config.DIR_OUTPUT).replace("\\", "/")
-        d = durs[i]
-        nm = names[i] if names and i < len(names) else f"scene_{index:02d}"
-        cards.append(f"""
-      <figure class="card">
-        <div class="frame"><iframe loading="lazy" src="../scene_html/{os.path.basename(scene)}?dur={d:.3f}"></iframe></div>
-        <figcaption><b>#{i+1:02d} · {nm}</b><span>起 {_fmt(acc)} · 时长 {d:.1f}s</span></figcaption>
-      </figure>""")
-        acc += d
-    cards_html = "".join(cards)
-
-    bg_css = (f"background:#10231a url('{os.path.basename(PREVIEW_BG)}') center/cover no-repeat;"
-              if has_bg else "background:#eef5f0;")
-
-    project_title = html_lib.escape(str(config.PROJECT_TITLE))
-    html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">
-<title>{project_title} · 预览 · {len(scenes)} 场景 · {_fmt(total)}</title>
-<style>
-  :root{{--w:600px;}}
-  *{{box-sizing:border-box;}}
-  body{{margin:0;background:#0c1512;color:#dff0e7;
-       font-family:'Microsoft YaHei','PingFang SC',-apple-system,sans-serif;}}
-  header{{position:sticky;top:0;z-index:5;backdrop-filter:blur(8px);
-    background:rgba(12,21,18,0.86);padding:18px 28px;border-bottom:1px solid #1f3a2c;}}
-  header h1{{margin:0;font-size:22px;color:#fff;}}
-  header p{{margin:6px 0 10px;font-size:14px;color:#8fbfa6;}}
-  header label{{font-size:14px;color:#bfe3d0;margin-right:14px;}}
-  .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--w),1fr));
-    gap:26px;padding:26px;}}
-  .card{{margin:0;background:#0f1c17;border:1px solid #1f3a2c;border-radius:12px;
-    overflow:hidden;box-shadow:0 6px 22px rgba(0,0,0,.35);}}
-  .frame{{position:relative;width:100%;aspect-ratio:16/9;{bg_css}}}
-  /* 3840x2160 scene scaled to the card width via a CSS var the JS keeps in sync */
-  .frame iframe{{position:absolute;top:0;left:0;width:3840px;height:2160px;border:0;
-    background:transparent;transform-origin:top left;transform:scale(calc(var(--cw,600)/3840));}}
-  figcaption{{display:flex;justify-content:space-between;align-items:baseline;
-    gap:10px;padding:10px 14px;font-size:14px;}}
-  figcaption b{{color:#eafff4;font-weight:700;}}
-  figcaption span{{color:#7fae97;font-size:12.5px;white-space:nowrap;}}
-</style></head><body>
-<header>
-  <h1>{project_title} · 全场景动态预览</h1>
-  <p>{len(scenes)} 个场景 · 全片 {_fmt(total)} · 每格循环播放（无声、无转场），仅供渲染前自检布局/动画/音画cue。</p>
-  <label>缩放 <input id="z" type="range" min="360" max="900" value="600"></label>
-  <label><input id="play" type="checkbox" checked> 播放</label>
-</header>
-<div class="grid" id="grid">{cards_html}</div>
-<script>
-  // keep each iframe's scale matched to its actual rendered width
-  const frames = [...document.querySelectorAll('.frame')];
-  function sync(){{ frames.forEach(f=>f.style.setProperty('--cw', f.clientWidth)); }}
-  new ResizeObserver(sync).observe(document.body); sync();
-  // zoom = grid column min-width
-  const z = document.getElementById('z');
-  z.oninput = () => {{ document.documentElement.style.setProperty('--w', z.value+'px'); requestAnimationFrame(sync); }};
-  // pause/play: toggling an iframe's src is the simplest cross-browser stop
-  const play = document.getElementById('play');
-  const srcs = frames.map(f=>f.querySelector('iframe').src);
-  play.onchange = () => frames.forEach((f,i)=>{{ const fr=f.querySelector('iframe');
-    fr.src = play.checked ? srcs[i] : 'about:blank'; }});
-</script>
-</body></html>"""
-
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"[preview] {len(scenes)} scenes -> {out}  (open it in a browser)")
+    result = re.sub(
+        r"@@(?:TITLE|COUNT|TOTAL|DATA)@@", lambda match: values[match.group()], template
+    )
+    atomic_text(out, result)
+    print(f"[preview] {len(rows)} scenes -> {out}")
     return out
 
 
 if __name__ == "__main__":
-    build()
+    from pipeline.workflow import stage_preview
+    from pipeline.io_utils import project_lock
+
+    with project_lock(config.ROOT):
+        stage_preview()

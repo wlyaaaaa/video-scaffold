@@ -20,13 +20,15 @@ import asyncio
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from pathlib import Path
+from pipeline.browser_runtime import ready
 from pipeline.indexed_files import indexed_files
 
 CANVAS = (0, 0, config.WIDTH, config.HEIGHT)
 # frosted-glass safe area computed from the background shader (see md-krijin notes)
 GLASS = (170, 151, 3670, 2009)
-HARD_TOL = 3      # px past the canvas before we call it a hard overflow
-SOFT_TOL = 8      # px past the glass before we note it
+HARD_TOL = 3  # px past the canvas before we call it a hard overflow
+SOFT_TOL = 8  # px past the glass before we note it
 
 _JS = """
 () => {
@@ -36,6 +38,9 @@ _JS = """
   for (const el of document.querySelectorAll(sel)) {
     const cs = getComputedStyle(el);
     if (parseFloat(cs.opacity) < 0.06 || cs.visibility === 'hidden') continue;
+    let ancestor=el.parentElement, hidden=false;
+    while(ancestor && ancestor.id!=='stage'){if(parseFloat(getComputedStyle(ancestor).opacity)<0.06){hidden=true;break;}ancestor=ancestor.parentElement;}
+    if(hidden)continue;
     let r; try { r = el.getBoundingClientRect(); } catch (e) { continue; }
     if (r.width < 0.5 && r.height < 0.5) continue;
     out.push({tag: el.tagName, l: r.left, t: r.top, r: r.right, b: r.bottom,
@@ -48,28 +53,74 @@ _JS = """
 
 async def _run(scenes, durs, names):
     from playwright.async_api import async_playwright
+
     findings = []
+    if len(scenes) != len(durs):
+        raise ValueError("scene/duration count mismatch")
     async with async_playwright() as p:
         try:
-            b = await p.chromium.launch(headless=True, channel="chrome",
-                                        args=["--no-sandbox", "--disable-dev-shm-usage"])
+            b = await p.chromium.launch(
+                headless=True,
+                channel="chrome",
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
         except Exception:
             b = await p.chromium.launch(headless=True)
-        ctx = await b.new_context(viewport={"width": config.WIDTH, "height": config.HEIGHT})
+        ctx = await b.new_context(
+            viewport={"width": config.WIDTH, "height": config.HEIGHT}
+        )
         pg = await ctx.new_page()
         for i, html in enumerate(scenes):
-            await pg.goto("file://" + os.path.abspath(html).replace("\\", "/"))
-            d = durs[i] if i < len(durs) else 6.0
-            await pg.evaluate(f"window.seekTime && window.seekTime({max(0.5, d - 0.4)})")
-            boxes = await pg.evaluate(_JS)
+            errors = []
+            handler = lambda error: errors.append(str(error))
+            pg.on("pageerror", handler)
+            await pg.goto(Path(html).resolve().as_uri(), wait_until="load")
+            await ready(pg)
+            d = durs[i]
+            times = await pg.evaluate("""() => [...document.querySelectorAll('[data-anim]')].flatMap(e => {
+              const a=+(e.dataset.delay||0), b=+(e.dataset.dur||1);return [a,a+b/2,a+b];
+            })""")
+            boxes = []
+            seen = set()
+            for sample in sorted(
+                {
+                    0.0,
+                    max(0.0, d - 1 / config.FPS),
+                    *[
+                        min(max(0.0, float(t)), max(0.0, d - 1 / config.FPS))
+                        for t in times
+                    ],
+                }
+            ):
+                await pg.evaluate("t=>window.seekTime(t)", sample)
+                for box in await pg.evaluate(_JS):
+                    key = tuple(box.values())
+                    if key not in seen:
+                        seen.add(key)
+                        boxes.append(box)
+            pg.remove_listener("pageerror", handler)
+            if errors:
+                raise RuntimeError("scene JavaScript error: " + errors[0])
             nm = names[i] if names and i < len(names) else os.path.basename(html)
             for bx in boxes:
-                off_canvas = (bx["l"] < CANVAS[0] - HARD_TOL or bx["t"] < CANVAS[1] - HARD_TOL
-                              or bx["r"] > CANVAS[2] + HARD_TOL or bx["b"] > CANVAS[3] + HARD_TOL)
-                off_glass = (bx["l"] < GLASS[0] - SOFT_TOL or bx["t"] < GLASS[1] - SOFT_TOL
-                             or bx["r"] > GLASS[2] + SOFT_TOL or bx["b"] > GLASS[3] + SOFT_TOL)
-                fully_off = (bx["l"] >= CANVAS[2] or bx["r"] <= CANVAS[0]
-                             or bx["t"] >= CANVAS[3] or bx["b"] <= CANVAS[1])
+                off_canvas = (
+                    bx["l"] < CANVAS[0] - HARD_TOL
+                    or bx["t"] < CANVAS[1] - HARD_TOL
+                    or bx["r"] > CANVAS[2] + HARD_TOL
+                    or bx["b"] > CANVAS[3] + HARD_TOL
+                )
+                off_glass = (
+                    bx["l"] < GLASS[0] - SOFT_TOL
+                    or bx["t"] < GLASS[1] - SOFT_TOL
+                    or bx["r"] > GLASS[2] + SOFT_TOL
+                    or bx["b"] > GLASS[3] + SOFT_TOL
+                )
+                fully_off = (
+                    bx["l"] >= CANVAS[2]
+                    or bx["r"] <= CANVAS[0]
+                    or bx["t"] >= CANVAS[3]
+                    or bx["b"] <= CANVAS[1]
+                )
                 # cut-off TEXT (the recurring bug) or a fully-invisible element = HARD;
                 # an image/shape bleeding off-frame is usually intentional = soft.
                 hard = fully_off or (off_canvas and bx["tag"] == "text")
@@ -88,7 +139,7 @@ def lint(scene_paths, durations, names=None):
     clean layout to the generic workflow. Returns the HARD finding count.
     """
     if not scene_paths:
-        print("[lint] no scenes built yet"); return 0
+        raise RuntimeError("layout lint has no scenes to inspect")
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     try:
@@ -104,31 +155,35 @@ def lint(scene_paths, durations, names=None):
     last = None
     for nm, kind, bx in sorted(findings, key=lambda f: (f[0], f[1] != "HARD")):
         if nm != last:
-            print(f"[lint] {nm}:"); last = nm
+            print(f"[lint] {nm}:")
+            last = nm
         edge = []
-        if bx["l"] < GLASS[0]: edge.append(f"left {bx['l']:.0f}")
-        if bx["t"] < GLASS[1]: edge.append(f"top {bx['t']:.0f}")
-        if bx["r"] > GLASS[2]: edge.append(f"right {bx['r']:.0f}")
-        if bx["b"] > GLASS[3]: edge.append(f"bottom {bx['b']:.0f}")
+        if bx["l"] < GLASS[0]:
+            edge.append(f"left {bx['l']:.0f}")
+        if bx["t"] < GLASS[1]:
+            edge.append(f"top {bx['t']:.0f}")
+        if bx["r"] > GLASS[2]:
+            edge.append(f"right {bx['r']:.0f}")
+        if bx["b"] > GLASS[3]:
+            edge.append(f"bottom {bx['b']:.0f}")
         tag = "  !! HARD" if kind == "HARD" else "   ~ soft"
         txt = f' "{bx["txt"]}"' if bx["txt"] else ""
         print(f"{tag} <{bx['tag']}>{txt}  [{', '.join(edge)}]")
-    print(f"[lint] {len(hard)} HARD (off-canvas, fix these), {len(soft)} soft "
-          f"(off-glass; full-bleed images are OK to ignore).")
+    print(
+        f"[lint] {len(hard)} HARD (off-canvas, fix these), {len(soft)} soft "
+        f"(off-glass; full-bleed images are OK to ignore)."
+    )
     return len(hard)
 
 
 def _default_scene_paths():
-    return list(
-        indexed_files(
-            os.path.join(config.DIR_SCENE, "scene_*.html")
-        ).values()
-    )
+    return list(indexed_files(os.path.join(config.DIR_SCENE, "scene_*.html")).values())
 
 
 if __name__ == "__main__":
     import json
+
     scenes = _default_scene_paths()
     with open(config.DURATIONS_JSON, encoding="utf-8") as f:
         durs = json.load(f)
-    lint(scenes, durs)
+    raise SystemExit(1 if lint(scenes, durs) else 0)

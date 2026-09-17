@@ -28,6 +28,11 @@ video-scaffold-backup.zip
 /build_md_scenes.py
 
 # misc
+/.video-machine.json
+/.video-workflow.lock
+/chapters.json
+/output/.video-machine.json
+/.video-workflow.lock
 .cache/
 *.log
 
