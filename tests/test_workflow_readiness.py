@@ -44,6 +44,19 @@ class CueAuditTests(unittest.TestCase):
 
 class DeliveryVerificationTests(unittest.TestCase):
     def _workspace(self, root: Path) -> tuple[Path, Path]:
+        import config
+
+        self.enterContext(
+            mock.patch.multiple(
+                config,
+                DIR_SCRIPTS=str(root / "scripts"),
+                DIR_AUDIO=str(root / "raw_audio"),
+                DIR_SRT=str(root / "srt_data"),
+                DIR_ASSETS=str(root / "assets"),
+                DURATIONS_JSON=str(root / "durations.json"),
+                BGM_PATH=str(root / "bgm.mp3"),
+            )
+        )
         output = root / "output"
         scenes = root / "scene_html"
         output.mkdir()
