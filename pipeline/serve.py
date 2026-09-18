@@ -3,7 +3,7 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import urlparse, unquote, quote
+from urllib.parse import urlparse, unquote
 import hashlib
 import mimetypes
 import os
@@ -137,19 +137,14 @@ def preview_server():
         thread.join(timeout=3)
 
 
-def main():
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--open", action="store_true")
-    args = parser.parse_args()
+def serve(*, open_browser=False):
     server = create_server()
     url = f"http://127.0.0.1:{server.server_port}/output/preview.html"
     print(
         f"Preview: {url} | Ctrl+C stops this server; underlying project files are unchanged.",
         flush=True,
     )
-    if args.open:
+    if open_browser:
         import webbrowser
 
         webbrowser.open(url)
@@ -159,6 +154,15 @@ def main():
         pass
     finally:
         server.server_close()
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--open", action="store_true")
+    args = parser.parse_args()
+    serve(open_browser=args.open)
 
 
 if __name__ == "__main__":

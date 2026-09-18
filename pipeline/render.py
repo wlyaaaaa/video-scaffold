@@ -27,8 +27,6 @@ import asyncio
 import glob
 import re
 import subprocess
-from urllib.parse import unquote, urlparse
-from urllib.request import url2pathname
 from collections import OrderedDict
 from multiprocessing import Process, Value, Lock, Queue
 
@@ -37,6 +35,7 @@ import config
 from pipeline.io_utils import safe_print as print
 from pipeline.artifact_identity import (
     read_record,
+    python_code_hash,
     sha256_file,
     write_record,
     output_record_matches,
@@ -96,7 +95,7 @@ def _render_identity_record(scene_html_paths, durations, chunk_frames, total_fra
             "extra": list(config.NVENC_EXTRA),
         },
         "screenshot_fast": config.SCREENSHOT_FAST,
-        "renderer_sha256": sha256_file(__file__),
+        "renderer_sha256": python_code_hash(__file__),
     }
 
 

@@ -1,212 +1,236 @@
-# -*- coding: utf-8 -*-
-"""
-Stage 3 (optional) - local faster-whisper word timing for A/V sync.
+"""Consume current word timings; local known-text alignment belongs to ChineseASR.
 
-We don't burn subtitles. We use whisper purely to learn *when* each word is
-spoken, so a scene's animations can be cued to the narration. Output is
-srt_data/srt_NN.json: a list of {word, start, end} in seconds.
-
-Model large-v3 on CUDA float16 is the verified quality/speed path.
+Auto reuses a valid existing timeline, then uses Fish native timestamps when
+available, otherwise the registered shared aligner. A malformed present native
+record is an error, not permission to conceal the failure or re-synthesize audio.
 """
 
-import os
-import sys
+from __future__ import annotations
+import hashlib
 import json
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import os
+from pathlib import Path
+import re
+import tempfile
 import config
-from pipeline.io_utils import safe_print as print
-from pipeline.artifact_identity import (
-    output_record_matches,
-    sha256_file,
-    write_output_record,
-)
-from pipeline.indexed_files import indexed_basename, indexed_files
+from pipeline.artifact_identity import read_record, sha256_file, write_output_record
+from pipeline.indexed_files import indexed_files, indexed_basename
+from pipeline.io_utils import atomic_json, publish_bundle, run, safe_print as print
+from pipeline.build_scene import validate_words
+
+SCHEMA = "video-scaffold.word-timing.v2"
 
 
-_CUDA_DLL_HANDLES = []
+def _script_path(audio_path):
+    index = int(Path(audio_path).stem.split("_")[-1])
+    return Path(config.DIR_SCRIPTS) / indexed_basename("script", index, ".txt")
 
 
-def _register_cuda_dlls():
-    """Windows: CTranslate2 needs cuBLAS/cuDNN 12 on the DLL search path.
-    Installed via `pip install nvidia-cublas-cu12` (cuDNN ships with ctranslate2).
-    """
-    if sys.platform != "win32":
-        return
-    import site
-    import glob as _glob
-
-    roots = list(site.getsitepackages()) + [site.getusersitepackages()]
-    dll_dirs = []
-    for root in roots:
-        dll_dirs += _glob.glob(
-            os.path.join(root, "nvidia", "*", "bin")
-        )  # cublas, cudart, cudnn...
-        dll_dirs.append(os.path.join(root, "ctranslate2"))
-    existing = [p for p in dll_dirs if os.path.isdir(p)]
-    for p in existing:
-        try:
-            _CUDA_DLL_HANDLES.append(os.add_dll_directory(p))
-        except OSError:
-            pass
-    # PATH is the search location the native CTranslate2 loader actually honors
-    # for resolving cuBLAS's implicit dependency on cudart, so prepend there too.
-    if existing:
-        os.environ["PATH"] = (
-            os.pathsep.join(existing) + os.pathsep + os.environ.get("PATH", "")
-        )
+def speech_text(text):
+    # Remove only the supported Fish delivery controls, not arbitrary bracketed text.
+    tags = set(config.FISH_EMOTION_TAGS + config.FISH_SFX_TAGS)
+    return re.sub(
+        r"\(([^()]*)\)|\[([^\[\]]*)\]",
+        lambda m: "" if (m[1] or m[2]).strip().lower().lstrip("/") in tags else m[0],
+        text,
+    ).strip()
 
 
-_register_cuda_dlls()
+def _choose_source(audio_path):
+    if config.TIMING_SOURCE != "auto":
+        return config.TIMING_SOURCE
+    return (
+        "fish" if Path(str(audio_path) + ".timestamps.json").exists() else "chinese-asr"
+    )
 
-_model = None  # WhisperModel
-_pipe = None  # BatchedInferencePipeline (max GPU throughput) if available
 
-
-def _identity_record(audio_path):
-    if config.TIMING_SOURCE == "fish":
-        return {
-            "schema": "video-scaffold.fish-word-timing.v1",
-            "audio_sha256": sha256_file(audio_path),
-            "native_sha256": sha256_file(audio_path + ".timestamps.json"),
-        }
-    return {
-        "schema": "video-scaffold.word-timing-identity.v1",
+def _identity_record(audio_path, source=None):
+    source = source or _choose_source(audio_path)
+    value = {
+        "schema": SCHEMA,
         "audio_sha256": sha256_file(audio_path),
-        "model": config.WHISPER_MODEL,
-        "device": config.WHISPER_DEVICE,
-        "compute": config.WHISPER_COMPUTE,
-        "language": config.WHISPER_LANGUAGE,
-        "batch_size": config.WHISPER_BATCH_SIZE,
-        "cpu_threads": config.WHISPER_CPU_THREADS,
-        "initial_prompt": config.WHISPER_INITIAL_PROMPT,
-        "word_timestamps": True,
-        "vad_filter": True,
+        "script_sha256": sha256_file(str(_script_path(audio_path))),
+        "source": source,
     }
+    if source == "fish":
+        value["native_sha256"] = sha256_file(str(audio_path) + ".timestamps.json")
+    return value
 
 
-def _get_engine():
-    """Load large-v3 once and prefer the batched CUDA pipeline."""
-    global _model, _pipe
-    if _model is None:
-        from faster_whisper import WhisperModel
-
-        print(
-            f"[whisper] loading {config.WHISPER_MODEL} on {config.WHISPER_DEVICE}/{config.WHISPER_COMPUTE}"
+def identity_matches(audio_path, timeline_path, record_path):
+    record = read_record(record_path)
+    if not record or not Path(timeline_path).is_file():
+        return False
+    if record.get("audio_sha256") != sha256_file(audio_path) or record.get(
+        "output_sha256"
+    ) != sha256_file(timeline_path):
+        return False
+    schema = record.get("schema")
+    if schema == SCHEMA:
+        source = record.get("source")
+        if source not in ("fish", "chinese-asr"):
+            return False
+        if config.TIMING_SOURCE != "auto" and config.TIMING_SOURCE != source:
+            return False
+        if source == "chinese-asr":
+            producer = record.get("producer") or {}
+            if (
+                not producer.get("model_identity")
+                or producer.get("exact_text_coverage") is not True
+            ):
+                return False
+        expected = _identity_record(audio_path, source)
+        return all(record.get(k) == v for k, v in expected.items())
+    # Narrow read-only compatibility: preserve existing valid outputs and their
+    # original declared producer. Do not invent new Whisper provenance.
+    if schema == "video-scaffold.word-timing-identity.v1":
+        return (
+            config.TIMING_SOURCE == "auto"
+            and all(
+                k in record
+                for k in ("model", "device", "compute", "language", "word_timestamps")
+            )
+            and record["word_timestamps"] is True
         )
-        _model = WhisperModel(
-            config.WHISPER_MODEL,
-            device=config.WHISPER_DEVICE,
-            compute_type=config.WHISPER_COMPUTE,
-            cpu_threads=config.WHISPER_CPU_THREADS,
-        )
-        try:
-            from faster_whisper import BatchedInferencePipeline
+    if schema == "video-scaffold.fish-word-timing.v1":
+        return config.TIMING_SOURCE in ("auto", "fish") and record.get(
+            "native_sha256"
+        ) == sha256_file(str(audio_path) + ".timestamps.json")
+    return False
 
-            _pipe = BatchedInferencePipeline(model=_model)
-        except Exception:
-            _pipe = None  # older faster-whisper: fall back to sequential
-    return _model, _pipe
+
+def _shared_alignment(audio_path, text, staged_output):
+    root, python = Path(config.CHINESE_ASR_ROOT), Path(config.CHINESE_ASR_PYTHON)
+    if (
+        not config.CHINESE_ASR_ROOT
+        or not config.CHINESE_ASR_PYTHON
+        or not root.is_dir()
+        or not python.is_file()
+    ):
+        raise RuntimeError(
+            "Native timestamps are unavailable. Configure the existing ChineseASR root/interpreter through the machine adapter, or supply Fish native timing; narration was not changed."
+        )
+    with tempfile.TemporaryDirectory(
+        prefix=".shared-align-", dir=Path(staged_output).parent
+    ) as temp:
+        text_path, result_path = (
+            Path(temp) / "narration.txt",
+            Path(temp) / "result.json",
+        )
+        text_path.write_text(text, encoding="utf-8", newline="\n")
+        env = dict(os.environ)
+        env["PYTHONUTF8"] = "1"
+        if config.GPU_BROKER_URL:
+            env["LOCAL_GPU_BROKER_URL"] = config.GPU_BROKER_URL
+        command = [
+            str(python),
+            "-X",
+            "utf8",
+            "-B",
+            "-m",
+            "zh_asr",
+            "align",
+            str(Path(audio_path).resolve()),
+            "--text-file",
+            str(text_path),
+            "--output",
+            str(result_path),
+            "--timeout-sec",
+            str(config.ALIGNMENT_TIMEOUT_SECONDS),
+        ]
+        # The shared CLI supervises its GPU worker; a timed-out parent is
+        # observed by that worker and cannot leave model execution orphaned.
+        run(
+            command,
+            cwd=str(root),
+            env=env,
+            timeout=config.ALIGNMENT_TIMEOUT_SECONDS + 20,
+        )
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        if (
+            result.get("schema") != "zh_asr.alignment-entry.v1"
+            or result.get("status") != "succeeded"
+            or result.get("exact_text_coverage") is not True
+        ):
+            raise RuntimeError(
+                "ChineseASR did not return a complete known-text alignment"
+            )
+        if (
+            result.get("audio_sha256") != sha256_file(audio_path)
+            or result.get("text_sha256")
+            != hashlib.sha256(text.encode("utf-8")).hexdigest()
+        ):
+            raise RuntimeError(
+                "ChineseASR alignment belongs to different audio or text"
+            )
+        words = validate_words(result.get("words"), result.get("duration_seconds"))
+        if not words:
+            raise RuntimeError("ChineseASR returned no word timings")
+        atomic_json(
+            str(staged_output) + ".producer.json",
+            {
+                "model_identity": result.get("model_identity"),
+                "lexical_truth_verified": False,
+                "exact_text_coverage": True,
+            },
+        )
+        return words
 
 
 def transcribe_one(audio_path, out_path):
-    if config.TIMING_SOURCE == "fish":
+    source = _choose_source(audio_path)
+    if source == "fish":
         from pipeline.fish_native import load
-        from pipeline.io_utils import atomic_json
 
         words = load(audio_path)
-        atomic_json(out_path, words)
-        return words
-    model, pipe = _get_engine()
-    # VAD trims silence; batching keeps the GPU useful on longer clips.
-    if pipe is not None:
-        segments, _ = pipe.transcribe(
-            audio_path,
-            language=config.WHISPER_LANGUAGE,
-            word_timestamps=True,
-            vad_filter=True,
-            batch_size=config.WHISPER_BATCH_SIZE,
-            initial_prompt=config.WHISPER_INITIAL_PROMPT,
-        )
     else:
-        segments, _ = model.transcribe(
-            audio_path,
-            language=config.WHISPER_LANGUAGE,
-            word_timestamps=True,
-            vad_filter=True,
-            initial_prompt=config.WHISPER_INITIAL_PROMPT,
-        )
-    words = []
-    for seg in segments:
-        for w in seg.words or []:
-            words.append(
-                {"word": w.word, "start": round(w.start, 3), "end": round(w.end, 3)}
-            )
-    from pipeline.build_scene import validate_words
-    from pipeline.io_utils import atomic_json
-
-    if not words:
-        raise RuntimeError("Whisper returned no words; review narration")
+        text = speech_text(_script_path(audio_path).read_text(encoding="utf-8"))
+        words = _shared_alignment(audio_path, text, out_path)
     validate_words(words)
     atomic_json(out_path, words)
-    print(
-        f"[whisper] {os.path.basename(audio_path)} -> {os.path.basename(out_path)} ({len(words)} words)"
-    )
     return words
 
 
-def _transcribe_batch(audio_dir=config.DIR_AUDIO, srt_dir=config.DIR_SRT, force=False):
-    os.makedirs(srt_dir, exist_ok=True)
+def transcribe_batch(audio_dir=None, srt_dir=None, force=False):
+    audio_dir, srt_dir = audio_dir or config.DIR_AUDIO, srt_dir or config.DIR_SRT
     audios = indexed_files(os.path.join(audio_dir, "audio_*.mp3"))
+    if not audios:
+        raise RuntimeError("no narration audio")
+    Path(srt_dir).mkdir(parents=True, exist_ok=True)
     for index, audio in audios.items():
-        out_path = os.path.join(
-            srt_dir,
-            indexed_basename("srt", index, ".json"),
-        )
-        identity_path = os.path.join(
-            srt_dir,
-            indexed_basename("timing", index, ".identity.json"),
-        )
-        identity = _identity_record(audio)
-        if not force and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
-            if output_record_matches(identity_path, identity, out_path):
-                print(
-                    f"[whisper] reuse {os.path.basename(out_path)} (audio identity matched)"
-                )
+        out = Path(srt_dir) / indexed_basename("srt", index, ".json")
+        record = Path(srt_dir) / indexed_basename("timing", index, ".identity.json")
+        if not force and out.is_file():
+            if identity_matches(audio, out, record):
+                if not validate_words(json.loads(out.read_text(encoding="utf-8"))):
+                    raise RuntimeError(
+                        "Accepted word timeline is empty; review before regenerating"
+                    )
+                print(f"[timing] reuse {out.name}; accepted producer retained")
                 continue
             raise RuntimeError(
-                f"{os.path.basename(out_path)} has no matching audio identity; "
-                "refusing stale word timing reuse. Review the audio, then run timing --force."
+                f"{out.name}: refusing stale word timing reuse; review and run timing --force (audio is preserved)"
             )
-        import tempfile
-        from pathlib import Path
-        from pipeline.io_utils import publish_bundle
-
-        with tempfile.TemporaryDirectory(prefix=".timing-", dir=srt_dir) as temporary:
-            staged = str(Path(temporary) / Path(out_path).name)
-            transcribe_one(audio, staged)
-            staged_identity = str(Path(temporary) / Path(identity_path).name)
-            write_output_record(staged_identity, identity, staged)
-            publish_bundle([(staged, out_path), (staged_identity, identity_path)])
-
-
-def transcribe_batch(audio_dir=config.DIR_AUDIO, srt_dir=config.DIR_SRT, force=False):
-    from pipeline.gpu import gpu_lease
-
-    global _model, _pipe
-    with gpu_lease(
-        config.TIMING_SOURCE == "whisper" and config.WHISPER_DEVICE == "cuda"
-    ) as lease:
-        try:
-            result = _transcribe_batch(audio_dir, srt_dir, force)
-            lease.check()
-            return result
-        finally:
-            _pipe = None
-            _model = None
-            import gc
-
-            gc.collect()
+        expected = _identity_record(audio)
+        print(f"[timing] {Path(audio).name}: {expected['source']}")
+        with tempfile.TemporaryDirectory(prefix=".timing-", dir=srt_dir) as temp:
+            staged = Path(temp) / out.name
+            transcribe_one(audio, str(staged))
+            if not validate_words(json.loads(staged.read_text(encoding="utf-8"))):
+                raise RuntimeError(
+                    "No usable word timings returned; previous output retained"
+                )
+            if expected != _identity_record(audio):
+                raise RuntimeError(
+                    "Audio, text or timing source changed during alignment"
+                )
+            producer = read_record(str(staged) + ".producer.json")
+            identity = dict(expected)
+            if producer:
+                identity["producer"] = producer
+            staged_record = Path(temp) / record.name
+            write_output_record(staged_record, identity, staged)
+            publish_bundle([(staged, out), (staged_record, record)])
 
 
 if __name__ == "__main__":

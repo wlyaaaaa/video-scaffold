@@ -5,7 +5,7 @@ param(
     [ValidateSet(
         'doctor', 'doctor-live', 'doctor-local', 'test', 'demo', 'smoke', 'serve', 'init',
         'status', 'plan', 'subtitles', 'manifest',
-        'tts', 'timing', 'prompts', 'build', 'lint', 'preview',
+        'tts', 'durations', 'timing', 'prompts', 'build', 'lint', 'preview',
         'render', 'merge', 'cover', 'chapters', 'verify', 'cleanup',
         'module', 'script', 'python'
     )]
@@ -47,7 +47,7 @@ else {
 }
 
 $workflowTasks = @(
-    'tts', 'timing', 'prompts', 'build', 'lint', 'preview',
+    'tts', 'durations', 'timing', 'prompts', 'build', 'lint', 'preview',
     'render', 'merge', 'cover', 'chapters', 'verify', 'cleanup',
     'status', 'plan', 'subtitles', 'manifest'
 )

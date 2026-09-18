@@ -1,16 +1,14 @@
 """Read-only delivery verification and explicit, bounded generated-file cleanup."""
 
 from __future__ import annotations
-import glob
 import json
 import math
-import os
 from pathlib import Path
 import re
 from fractions import Fraction
 import config
 from pipeline.io_utils import safe_print as print
-from pipeline.io_utils import run, positive
+from pipeline.io_utils import run
 
 
 def cleanup(keep_srt=True, keep_scene_html=True, *, dry_run=False):
@@ -128,6 +126,10 @@ def _expected_codec():
     }.get(config.VCODEC, config.VCODEC)
 
 
+from pipeline.artifact_identity import validation_session
+
+
+@validation_session()
 def verify():
     from pipeline import contracts
 

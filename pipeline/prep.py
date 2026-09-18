@@ -53,7 +53,7 @@ def write_scripts(segments, scripts_dir=None, *, mode="create"):
     replace reconciles only files owned by the previous generated manifest.
     """
     from pathlib import Path
-    import json, tempfile
+    import tempfile
     from pipeline.indexed_files import indexed_files
     from pipeline.artifact_identity import read_record, sha256_file
     from pipeline.io_utils import publish_bundle, atomic_json

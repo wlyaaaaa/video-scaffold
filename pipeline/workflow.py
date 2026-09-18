@@ -83,13 +83,30 @@ def stage_tts(*, force: bool = False, **_: object) -> bool:
         "scripts/script_NN.txt",
         _indexed(os.path.join(config.DIR_SCRIPTS, "script_*.txt")),
     )
-    fish_tts.synth_batch(force=force)
+    fish_tts.synth_batch(
+        config.DIR_SCRIPTS,
+        config.DIR_AUDIO,
+        reference_id=config.FISH_REFERENCE_ID,
+        model=config.FISH_MODEL,
+        force=force,
+    )
     audio = _indexed(os.path.join(config.DIR_AUDIO, "audio_*.mp3"))
     _same_indices("scripts", scripts, "audio clips", audio)
     return True
 
 
-def stage_timing(*, force: bool = False, **_: object) -> bool:
+def stage_durations(**_: object) -> bool:
+    contracts.require_audio()
+    durations.build(config.DIR_AUDIO, config.DURATIONS_JSON)
+    contracts.require_durations()
+    return True
+
+
+def stage_timing(
+    *, force: bool = False, source: str | None = None, **_: object
+) -> bool:
+    if source:
+        config.TIMING_SOURCE = source
     scripts = _require(
         "scripts/script_NN.txt",
         _indexed(os.path.join(config.DIR_SCRIPTS, "script_*.txt")),
@@ -100,11 +117,12 @@ def stage_timing(*, force: bool = False, **_: object) -> bool:
     )
     _same_indices("scripts", scripts, "audio clips", audio)
     contracts.require_audio()
-    durations.build()
+    durations.build(config.DIR_AUDIO, config.DURATIONS_JSON)
     transcribe.transcribe_batch(force=force)
     words = _indexed(os.path.join(config.DIR_SRT, "srt_*.json"))
     _same_indices("audio clips", audio, "word timelines", words)
     _load_durations(len(audio))
+    contracts.require_timings()
     return True
 
 
@@ -247,7 +265,7 @@ def _chapter_groups(path: str) -> list[tuple[int, str]]:
 
 
 def stage_chapters(*, chapters_json: str | None = None, **_: object) -> bool:
-    audio, words, values = contracts.require_timings()
+    audio, values = contracts.require_durations()
     path = chapters_json or os.path.join(config.ROOT, "chapters.json")
     groups = _chapter_groups(path)
     ids = list(audio)
@@ -319,6 +337,7 @@ STAGES = {
     "subtitles": stage_subtitles,
     "manifest": stage_manifest,
     "tts": stage_tts,
+    "durations": stage_durations,
     "timing": stage_timing,
     "prompts": stage_prompts,
     "build": stage_build,
@@ -349,6 +368,17 @@ def main() -> int:
     parser.add_argument(
         "--force", action="store_true", help="regenerate accepted TTS/timing files"
     )
+    parser.add_argument(
+        "--source",
+        choices=("auto", "fish", "chinese-asr"),
+        help="word timing source; does not change or regenerate narration",
+    )
+    parser.add_argument(
+        "--open",
+        dest="open_browser",
+        action="store_true",
+        help="open the generated preview using the existing temporary local server",
+    )
     parser.add_argument("--subtitle", default="", help="cover subtitle")
     parser.add_argument("--kicker", default="", help="cover kicker")
     parser.add_argument("--hero", help="cover hero image path")
@@ -371,6 +401,10 @@ def main() -> int:
     if not accepted:
         print(f"[workflow] FAIL {stage}", file=sys.stderr)
         return 1
+    if stage == "preview" and args.get("open_browser"):
+        from pipeline.serve import serve
+
+        serve(open_browser=True)
     if stage not in ("status", "plan"):
         print(f"[workflow] PASS {stage}")
     return 0

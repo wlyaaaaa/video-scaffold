@@ -14,7 +14,7 @@ Per-project workspace (generated, git-ignored, created on demand):
     assets/        source images, named freely and referenced by scenes
     scripts/       script_01.txt .. script_NN.txt  (one paragraph per scene)
     raw_audio/     audio_01.mp3 .. audio_NN.mp3     (TTS output)
-    srt_data/      srt_01.json .. srt_NN.json       (whisper word timing)
+    srt_data/      srt_01.json .. srt_NN.json       (validated word timing)
     scene_html/    scene_01.html .. scene_NN.html   (built from the base board)
     rendered/      per-scene overlay video (optional intermediate)
     output/        final_output.mp4, cover.png, chapters.txt
@@ -162,15 +162,9 @@ FISH_SFX_TAGS = [
     "long pause",
 ]
 
-# --- faster-whisper (best local quality, max GPU/CPU utilisation) -----------
-WHISPER_MODEL = "large-v3"  # best accuracy
-WHISPER_DEVICE = "cuda"
-WHISPER_COMPUTE = "float16"  # modern NVIDIA GPUs keep quality high
-WHISPER_LANGUAGE = "zh"
-WHISPER_BATCH_SIZE = 16
-WHISPER_CPU_THREADS = min(16, max(1, os.cpu_count() or 8))
-# Per-video hot words belong here. Keep the reusable scaffold topic-neutral.
-WHISPER_INITIAL_PROMPT = os.environ.get("WHISPER_INITIAL_PROMPT", "")
+# Word timing uses Fish's native output or the registered ChineseASR adapter.
+# Local ASR model selection, weights and CUDA packages belong to ChineseASR.
+FISH_NATIVE_TIMESTAMPS = os.environ.get("VIDEO_FISH_NATIVE_TIMESTAMPS", "1") != "0"
 
 # --- chapters (Bilibili) ----------------------------------------------------
 # Bilibili reads "MM:SS Title" / "HH:MM:SS Title" lines; first MUST be 00:00.
@@ -213,9 +207,14 @@ GPU_BROKER_URL = os.environ.get("VIDEO_GPU_BROKER_URL", "")
 GPU_LEASE_SECONDS = 120
 WORKER_TIMEOUT_SECONDS = 900
 PROCESS_TIMEOUT_SECONDS = 180
-TIMING_SOURCE = os.environ.get("VIDEO_TIMING_SOURCE", "whisper")
-if TIMING_SOURCE not in ("whisper", "fish"):
-    raise ValueError("VIDEO_TIMING_SOURCE must be whisper or fish")
+TIMING_SOURCE = os.environ.get("VIDEO_TIMING_SOURCE", "auto")
+if TIMING_SOURCE not in ("auto", "fish", "chinese-asr"):
+    raise ValueError(
+        "VIDEO_TIMING_SOURCE must be auto, fish or chinese-asr. Legacy Whisper results are reusable in auto mode; local inference now belongs to ChineseASR."
+    )
+CHINESE_ASR_ROOT = os.environ.get("VIDEO_CHINESE_ASR_ROOT", "")
+CHINESE_ASR_PYTHON = os.environ.get("VIDEO_CHINESE_ASR_PYTHON", "")
+ALIGNMENT_TIMEOUT_SECONDS = 300
 # CPU profile is explicit for portable validation, never a silent GPU fallback.
 if os.environ.get("VIDEO_ENCODER_PROFILE") == "cpu-h264":
     VCODEC = "libx264"
@@ -237,3 +236,11 @@ if os.path.isfile(_MACHINE_PROFILE):
             os.environ["PATH"] = (
                 _machine[_tool_key] + os.pathsep + os.environ.get("PATH", "")
             )
+
+if os.path.isfile(_MACHINE_PROFILE):
+    CHINESE_ASR_ROOT = os.environ.get(
+        "VIDEO_CHINESE_ASR_ROOT", _machine.get("chinese_asr_root", "")
+    )
+    CHINESE_ASR_PYTHON = os.environ.get(
+        "VIDEO_CHINESE_ASR_PYTHON", _machine.get("chinese_asr_python", "")
+    )

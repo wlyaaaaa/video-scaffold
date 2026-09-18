@@ -23,7 +23,7 @@ pwsh -File .\run.ps1 prompts
 每段旁白会得到 `scene_html/prompt_NN.txt`，其中包含：
 
 - 原旁白
-- Whisper 可 cue 的真实词序列
+- 当前时间轴可 cue 的词序列
 - 本场素材的真实绝对 `file:` URI
 - 设计与动画契约
 
@@ -68,8 +68,7 @@ AI 或人工审阅结果后，只把片段保存为 `scene_html/fragment_NN.svg`
 
 - cue 必须是旁白真实说出的词。
 - 屏幕显示“9.5”而旁白念“九点五”时，优先 cue 前后的稳定词。
-- 如果专业词识别错误，先设置本期 `WHISPER_INITIAL_PROMPT` 并运行
-  `timing --force`；仍错误时只调整 cue 匹配词。
+- 如果专业词识别错误，先核对原音频与文案；必要时用 `timing --source chinese-asr --force` 重做对齐，或单独调用 ChineseASR 识别复核。不要用对齐成功证明发音正确；仍有歧义时回听原音频，选取真实、稳定的 cue 匹配词。
 - 没有时间轴或未找到词时，构建结果会保留 `data-cue-missing`。这是阻断项，不能靠
   `data-delay` 掩盖后继续出片。
 

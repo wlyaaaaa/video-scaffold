@@ -12,6 +12,8 @@ import re
 import config
 from pipeline.artifact_identity import (
     read_record,
+    validation_session,
+    python_code_hash,
     sha256_file,
     output_record_matches,
     write_output_record,
@@ -53,33 +55,39 @@ def require_audio():
             text, config.FISH_REFERENCE_ID, config.FISH_MODEL
         )
         record = os.path.join(config.DIR_AUDIO, f"audio_{index:02d}.identity.json")
-        if not output_record_matches(record, expected, path):
+        if not fish_tts.audio_identity_matches(record, expected, path):
             raise RuntimeError(
                 f"audio_{index:02d} is stale or unbound; review and run tts --force"
             )
     return audio
 
 
-def require_timings():
-    from pipeline import durations, transcribe, build_scene
+def require_durations():
+    from pipeline import durations
 
     audio = require_audio()
     values = durations.load_validated(config.DIR_AUDIO, config.DURATIONS_JSON)
     if not isinstance(values, list) or len(values) != len(audio):
         raise RuntimeError("duration count does not match narration")
-    values = [positive(value, "scene duration") for value in values]
+    return audio, [positive(value, "scene duration") for value in values]
+
+
+def require_timings():
+    from pipeline import transcribe, build_scene
+
+    audio, values = require_durations()
     words = indexed(config.DIR_SRT, "srt", ".json")
     same(audio, words, "word timelines")
     for (index, path), duration in zip(words.items(), values):
-        expected = transcribe._identity_record(audio[index])
         record = os.path.join(config.DIR_SRT, f"timing_{index:02d}.identity.json")
-        if not output_record_matches(record, expected, path):
+        if not transcribe.identity_matches(audio[index], path, record):
             raise RuntimeError(
                 f"srt_{index:02d} is stale or unbound; run timing --force"
             )
-        build_scene.validate_words(
+        if not build_scene.validate_words(
             json.loads(Path(path).read_text(encoding="utf-8")), duration
-        )
+        ):
+            raise RuntimeError(f"srt_{index:02d} is empty; no usable word timing")
     return audio, words, values
 
 
@@ -88,7 +96,9 @@ def scene_expected(index):
         "schema": "video-scaffold.scene-inputs.v1",
         "scene_id": index,
         "template_sha256": sha256_file(config.TEMPLATE_BASE),
-        "builder_sha256": sha256_file(str(Path(__file__).with_name("build_scene.py"))),
+        "builder_sha256": python_code_hash(
+            str(Path(__file__).with_name("build_scene.py"))
+        ),
         "fragment_sha256": sha256_file(
             os.path.join(config.DIR_SCENE, f"fragment_{index:02d}.svg")
         ),
@@ -150,7 +160,7 @@ def video_expected(scenes=None, values=None):
     expected["schema"] = "video-scaffold.video-track.v1"
     expected.pop("frames", None)
     expected["total_frames"] = count
-    expected["renderer_sha256"] = sha256_file(
+    expected["renderer_sha256"] = python_code_hash(
         str(Path(__file__).with_name("render.py"))
     )
     return expected
@@ -186,7 +196,7 @@ def final_expected():
         ],
         "bgm_sha256": sha256_file(bgm) if os.path.isfile(bgm) else None,
         "bgm_volume": config.BGM_VOLUME,
-        "merge_sha256": sha256_file(str(Path(__file__).with_name("merge.py"))),
+        "merge_sha256": python_code_hash(str(Path(__file__).with_name("merge.py"))),
         "expected_frames": round(sum(values) * config.FPS),
         "expected_seconds": round(sum(values) * config.FPS) / config.FPS,
     }
@@ -229,7 +239,7 @@ def require_cover():
 
 
 def chapters_expected(definitions):
-    audio, words, values = require_timings()
+    audio, values = require_durations()
     return {
         "schema": "video-scaffold.chapters.v1",
         "definitions": str(Path(definitions).resolve()),
@@ -255,10 +265,12 @@ def require_chapters():
     return expected
 
 
+@validation_session()
 def status():
     checks = (
         ("scripts", scripts),
         ("tts", require_audio),
+        ("durations", require_durations),
         ("timing", require_timings),
         ("build", require_scenes),
         ("render", require_video),
@@ -298,7 +310,9 @@ def subtitles_expected():
             {"scene_id": i, "duration": d, "words_sha256": sha256_file(words[i])}
             for i, d in zip(audio, values)
         ],
-        "exporter_sha256": sha256_file(str(Path(__file__).with_name("subtitles.py"))),
+        "exporter_sha256": python_code_hash(
+            str(Path(__file__).with_name("subtitles.py"))
+        ),
     }
 
 

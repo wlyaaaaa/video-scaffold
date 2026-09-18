@@ -1,0 +1,4 @@
+# Optional: only needed to regenerate the shipped seamless background.
+-r requirements.txt
+moderngl>=5.8
+numpy>=1.24

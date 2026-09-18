@@ -14,14 +14,12 @@ API contract (see config.py):
 
 import os
 import sys
-import subprocess
 import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from pipeline.io_utils import safe_print as print
 from pipeline.artifact_identity import (
-    output_record_matches,
     sha256_bytes,
     write_output_record,
 )
@@ -30,15 +28,37 @@ from pipeline.indexed_files import indexed_basename, indexed_files
 
 def _identity_record(text, reference_id, model):
     return {
-        "schema": "video-scaffold.tts-artifact-identity.v1",
+        "schema": "video-scaffold.tts-artifact-identity.v2",
         "script_sha256": sha256_bytes(text.encode("utf-8")),
         "endpoint": config.FISH_ENDPOINT,
         "model": model,
         "reference_id": reference_id or "",
         "format": config.FISH_FORMAT,
         "tail_silence_seconds": config.SCENE_TAIL_SILENCE,
-        "timing_source": config.TIMING_SOURCE,
     }
+
+
+def audio_identity_matches(record_path, expected, audio_path):
+    """Keep production provenance, but do not re-synthesize to select another timeline."""
+    from pipeline.artifact_identity import read_record, sha256_file
+
+    record = read_record(record_path)
+    if not record or record.get("schema") not in (
+        "video-scaffold.tts-artifact-identity.v1",
+        "video-scaffold.tts-artifact-identity.v2",
+    ):
+        return False
+    actual = dict(record)
+    output_hash = actual.pop("output_sha256", None)
+    if actual["schema"].endswith(".v1"):
+        if actual.pop("timing_source", None) not in ("whisper", "fish"):
+            return False
+        actual["schema"] = expected["schema"]
+    return (
+        actual == expected
+        and os.path.isfile(audio_path)
+        and output_hash == sha256_file(audio_path)
+    )
 
 
 def _pad_tail(path, seconds=None):
@@ -75,7 +95,7 @@ def _pad_tail(path, seconds=None):
 
 def synth_one(text, out_path, reference_id=None, model=None):
     from pathlib import Path
-    from pipeline.io_utils import atomic_output, atomic_json, run
+    from pipeline.io_utils import atomic_output, atomic_json
     from pipeline.artifact_identity import sha256_file
     from pipeline.durations import probe_seconds
     import time
@@ -97,7 +117,7 @@ def synth_one(text, out_path, reference_id=None, model=None):
     body = {"text": text, "format": "mp3"}
     if reference_id:
         body["reference_id"] = reference_id
-    native = config.TIMING_SOURCE == "fish"
+    native = config.FISH_NATIVE_TIMESTAMPS
     url = config.FISH_ENDPOINT.rstrip("/") + (
         "/stream/with-timestamp" if native else ""
     )
@@ -139,6 +159,8 @@ def synth_one(text, out_path, reference_id=None, model=None):
                         "words": words,
                     },
                 )
+            elif not native:
+                Path(str(out_path) + ".timestamps.json").unlink(missing_ok=True)
             return True
         except (requests.Timeout, requests.ConnectionError):
             if attempt == 2:
@@ -183,7 +205,7 @@ def synth_batch(
         )
         identity = _identity_record(text, reference_id, model)
         if not force and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
-            if output_record_matches(identity_path, identity, out_path):
+            if audio_identity_matches(identity_path, identity, out_path):
                 print(
                     f"[fish] reuse {os.path.basename(out_path)} (source identity matched)"
                 )
@@ -209,11 +231,15 @@ def synth_batch(
             staged_identity = str(Path(temporary) / Path(identity_path).name)
             write_output_record(staged_identity, identity, staged)
             pairs = [(staged, out_path), (staged_identity, identity_path)]
-            if config.TIMING_SOURCE == "fish":
+            if config.FISH_NATIVE_TIMESTAMPS:
                 pairs.append(
                     (staged + ".timestamps.json", out_path + ".timestamps.json")
                 )
             publish_bundle(pairs)
+            if not config.FISH_NATIVE_TIMESTAMPS:
+                # A deliberately regenerated plain-TTS clip must not inherit an
+                # obsolete native sidecar and block the shared-alignment route.
+                Path(out_path + ".timestamps.json").unlink(missing_ok=True)
             outputs.append(out_path)
     return outputs
 

@@ -70,8 +70,6 @@ def _probe(path: str) -> dict[str, object]:
 
 def _package_check() -> Check:
     packages = ["playwright", "requests"]
-    if config.TIMING_SOURCE == "whisper":
-        packages += ["faster-whisper", "ctranslate2"]
     missing = []
     versions = []
     for package in packages:
@@ -196,48 +194,6 @@ def _nvenc_check() -> Check:
     )
 
 
-def _cuda_check() -> Check:
-    try:
-        from pipeline import transcribe  # noqa: F401 - registers Windows CUDA DLL directories
-        import ctranslate2
-
-        count = ctranslate2.get_cuda_device_count()
-        compute = (
-            sorted(ctranslate2.get_supported_compute_types("cuda")) if count else []
-        )
-        return _check(
-            "whisper-cuda", count > 0, f"devices={count}, compute={','.join(compute)}"
-        )
-    except Exception as error:
-        return Check("whisper-cuda", "FAIL", str(error))
-
-
-def _model_cache_check() -> Check:
-    model = str(config.WHISPER_MODEL)
-    if pathlib.Path(model).is_dir():
-        paths = [pathlib.Path(model) / "model.bin"]
-    else:
-        home = pathlib.Path(
-            os.environ.get(
-                "HF_HOME", str(pathlib.Path.home() / ".cache" / "huggingface")
-            )
-        )
-        cache = pathlib.Path(os.environ.get("HF_HUB_CACHE", str(home / "hub")))
-        slug = "models--" + (
-            model if "/" in model else "Systran/faster-whisper-" + model
-        ).replace("/", "--")
-        paths = list((cache / slug / "snapshots").glob("*/model.bin"))
-    found = any(path.is_file() and path.stat().st_size > 0 for path in paths)
-    return _check(
-        "whisper-model-cache",
-        found,
-        "model weights located; actual inference not checked"
-        if found
-        else "local weights not located; no download was attempted",
-        warning=True,
-    )
-
-
 def _fish_config_check() -> Check:
     ready = bool(
         config.get_fish_api_key() and config.FISH_MODEL and config.FISH_REFERENCE_ID
@@ -304,14 +260,20 @@ def run_checks(*, live_fish: bool = False, live_local: bool = False) -> list[Che
         Check(
             "mode",
             "PASS",
-            "live-local probes requested"
-            if live_local
-            else "static read-only; no browser/GPU/network/private key read",
+            "live Fish probe requested"
+            if live_fish
+            else (
+                "live-local probes requested"
+                if live_local
+                else "static read-only; no browser/GPU/network/private key read"
+            ),
         ),
         Check(
-            "fish-route",
-            "UNKNOWN",
-            f"configured model={config.FISH_MODEL}; account and voice not tested",
+            "timing-route",
+            "PASS",
+            "auto: retain valid timeline, prefer native Fish; use registered ChineseASR only when needed"
+            if config.TIMING_SOURCE == "auto"
+            else config.TIMING_SOURCE,
         ),
         Check(
             "gpu-coordination",
@@ -321,8 +283,25 @@ def run_checks(*, live_fish: bool = False, live_local: bool = False) -> list[Che
             else "standalone mode; set machine GPU broker adapter on managed hosts",
         ),
     ]
-    if config.TIMING_SOURCE == "whisper":
-        checks.append(_model_cache_check())
+    shared = bool(
+        config.CHINESE_ASR_ROOT
+        and config.CHINESE_ASR_PYTHON
+        and pathlib.Path(config.CHINESE_ASR_PYTHON).is_file()
+        and (
+            pathlib.Path(config.CHINESE_ASR_ROOT) / "src/zh_asr/alignment_entry.py"
+        ).is_file()
+    )
+    checks.append(
+        Check(
+            "shared-alignment",
+            "PASS"
+            if shared
+            else ("FAIL" if config.TIMING_SOURCE == "chinese-asr" else "OPTIONAL"),
+            "registered ChineseASR adapter is present; inference not performed"
+            if shared
+            else "not configured; native Fish timing needs no local ASR runtime",
+        )
+    )
     if live_local:
         for name, function in (
             ("background", _background_check),
@@ -333,16 +312,10 @@ def run_checks(*, live_fish: bool = False, live_local: bool = False) -> list[Che
                 checks.append(function())
             except Exception as error:
                 checks.append(Check(name, "FAIL", str(error)))
-        if config.TIMING_SOURCE == "whisper" and config.WHISPER_DEVICE == "cuda":
-            from pipeline.gpu import gpu_lease
-
-            try:
-                with gpu_lease():
-                    checks.append(_cuda_check())
-            except Exception as error:
-                checks.append(Check("whisper-cuda", "FAIL", str(error)))
     if live_fish:
         checks.extend((_fish_config_check(), _fish_live_check()))
+    else:
+        checks.append(Check("fish-route", "UNKNOWN", "not probed in this invocation"))
     return checks
 
 

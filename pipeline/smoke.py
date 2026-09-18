@@ -133,6 +133,14 @@ def _inside_fixture_impl(*, live_fish=False):
                     {"word": text[5:], "start": 0.8, "end": 1.1},
                 ],
             )
+            atomic_json(
+                audio + ".timestamps.json",
+                {
+                    "schema": "video-scaffold.fish-timestamps.v1",
+                    "audio_sha256": sha256_file(audio),
+                    "words": json.loads(Path(words).read_text(encoding="utf-8")),
+                },
+            )
             write_output_record(
                 str(Path(config.DIR_SRT) / f"timing_{index:02d}.identity.json"),
                 transcribe._identity_record(audio),
@@ -204,10 +212,9 @@ def _inside_fixture_impl(*, live_fish=False):
 
 
 def _inside_fixture(*, live_fish=False):
-    from pipeline.gpu import gpu_lease
-
-    with gpu_lease():
-        return _inside_fixture_impl(live_fish=live_fish)
+    # Each GPU consumer owns its existing lease. Cloud TTS and shared ASR must
+    # not execute while holding a video-render lease from a different owner.
+    return _inside_fixture_impl(live_fish=live_fish)
 
 
 def run_fixture(target=None, *, gpu=False, live_fish=False):
@@ -231,7 +238,7 @@ def run_fixture(target=None, *, gpu=False, live_fish=False):
             )
             if not live_fish:
                 output.write(
-                    "FISH_MODEL='synthetic-integration-fixture'\nFISH_REFERENCE_ID='synthetic-fixture'\nWHISPER_MODEL='synthetic-integration-fixture'\nTIMING_SOURCE='whisper'\n"
+                    "FISH_MODEL='synthetic-integration-fixture'\nFISH_REFERENCE_ID='synthetic-fixture'\nTIMING_SOURCE='auto'\n"
                 )
         environment = dict(os.environ)
         environment["PYTHONDONTWRITEBYTECODE"] = "1"

@@ -7,7 +7,6 @@ Native timestamps remain opt-in; they do not certify pronunciation accuracy.
 import base64
 import json
 import time
-from pathlib import Path
 from pipeline.build_scene import validate_words
 from pipeline.io_utils import positive
 from pipeline.artifact_identity import sha256_file, read_record

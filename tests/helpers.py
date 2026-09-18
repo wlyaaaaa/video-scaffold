@@ -32,8 +32,7 @@ def project_graph(ids=(1, 4), duration=2.0):
             "PROJECT_TITLE": "Synthetic unit fixture",
             "FISH_MODEL": "unit-fixture",
             "FISH_REFERENCE_ID": "unit-fixture",
-            "WHISPER_MODEL": "unit-fixture",
-            "TIMING_SOURCE": "whisper",
+            "TIMING_SOURCE": "auto",
         }
         for key, value in values.items():
             patches.enter_context(mock.patch.object(config, key, value))
@@ -69,6 +68,11 @@ def project_graph(ids=(1, 4), duration=2.0):
                 json.dumps([{"word": text, "start": 0.2, "end": min(1.0, duration)}]),
                 encoding="utf-8",
             )
+            from pipeline.io_utils import atomic_json
+            from pipeline.artifact_identity import sha256_file
+            atomic_json(audio + ".timestamps.json", {
+                "schema": "video-scaffold.fish-timestamps.v1", "audio_sha256": sha256_file(audio),
+                "words": json.loads(Path(word).read_text(encoding="utf-8"))})
             write_output_record(
                 str(Path(config.DIR_SRT) / f"timing_{index:02d}.identity.json"),
                 transcribe._identity_record(audio),

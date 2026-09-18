@@ -345,10 +345,14 @@ class GenericProjectTests(unittest.TestCase):
             )
             self.assertEqual("keep unrelated", unrelated.read_text(encoding="utf-8"))
 
+    @mock.patch("config.FISH_NATIVE_TIMESTAMPS", False)
     def test_numeric_order_is_shared_by_pipeline_consumers(self) -> None:
         from pipeline import durations, fish_tts, merge, transcribe, workflow
 
-        with tempfile.TemporaryDirectory() as temporary:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch("config.DIR_SCRIPTS", str(Path(temporary) / "scripts")),
+        ):
             root = Path(temporary)
             scripts = root / "scripts"
             audio = root / "audio"
@@ -385,7 +389,20 @@ class GenericProjectTests(unittest.TestCase):
 
             def record_transcript(audio_path: str, out_path: str) -> None:
                 transcript_calls.append((Path(audio_path).name, Path(out_path).name))
-                Path(out_path).write_text("[]", encoding="utf-8")
+                Path(out_path).write_text(
+                    json.dumps([{"word": "fixture", "start": 0.0, "end": 0.5}]),
+                    encoding="utf-8",
+                )
+                Path(out_path + ".producer.json").write_text(
+                    json.dumps(
+                        {
+                            "model_identity": {"fixture": True},
+                            "lexical_truth_verified": False,
+                            "exact_text_coverage": True,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
 
             with mock.patch.object(
                 transcribe,
@@ -531,8 +548,8 @@ class GenericProjectTests(unittest.TestCase):
             self.assertFalse((target / "templates" / "cover_md.html").exists())
             self.assertFalse((target / "templates" / "cover_md_43.html").exists())
             next_steps = output.getvalue()
-            self.assertIn(r"next: run: pwsh -File .\run.ps1 test", next_steps)
-            self.assertIn(r"then: run: pwsh -File .\run.ps1 doctor", next_steps)
+            self.assertIn(r"next: run: pwsh -File .\run.ps1 doctor", next_steps)
+            self.assertIn("then: set PROJECT_TITLE", next_steps)
             self.assertLess(
                 next_steps.index("run.ps1 test"), next_steps.index("doctor-live")
             )
@@ -554,7 +571,7 @@ class GenericProjectTests(unittest.TestCase):
             config.PROJECT_TITLE,
         )
         self.assertEqual(
-            os.environ.get("WHISPER_INITIAL_PROMPT", ""), config.WHISPER_INITIAL_PROMPT
+            os.environ.get("VIDEO_TIMING_SOURCE", "auto"), config.TIMING_SOURCE
         )
 
     def test_doctor_module_exposes_local_preflight(self) -> None:
@@ -580,6 +597,7 @@ class GenericProjectTests(unittest.TestCase):
         self.assertEqual("BUSY", check.status)
         self.assertIn("1252 MiB free", check.detail)
 
+    @mock.patch("config.FISH_NATIVE_TIMESTAMPS", False)
     def test_tts_reuse_requires_matching_script_and_configuration_identity(
         self,
     ) -> None:
@@ -623,11 +641,15 @@ class GenericProjectTests(unittest.TestCase):
                 fish_tts.synth_batch(str(scripts), str(audio), force=True)
             synth.assert_called_once()
 
-    def test_timing_reuse_requires_matching_audio_and_model_identity(self) -> None:
+    def test_timing_reuse_requires_matching_audio_and_source_identity(self) -> None:
         from pipeline import transcribe
 
-        with tempfile.TemporaryDirectory() as temporary:
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch("config.DIR_SCRIPTS", temporary),
+        ):
             root = Path(temporary)
+            (root / "script_01.txt").write_text("fixture", encoding="utf-8")
             audio = root / "audio"
             timelines = root / "timelines"
             audio.mkdir()
@@ -636,7 +658,20 @@ class GenericProjectTests(unittest.TestCase):
             accepted = timelines / "srt_01.json"
 
             def transcribe_audio(_audio_path, out_path):
-                Path(out_path).write_text("[]", encoding="utf-8")
+                Path(out_path).write_text(
+                    json.dumps([{"word": "fixture", "start": 0.0, "end": 0.5}]),
+                    encoding="utf-8",
+                )
+                Path(out_path + ".producer.json").write_text(
+                    json.dumps(
+                        {
+                            "model_identity": {"fixture": True},
+                            "lexical_truth_verified": False,
+                            "exact_text_coverage": True,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
                 return []
 
             with mock.patch.object(

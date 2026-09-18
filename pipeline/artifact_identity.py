@@ -12,6 +12,22 @@ import hashlib
 import json
 import os
 from typing import Any
+from contextlib import contextmanager
+from contextvars import ContextVar
+
+_HASHES = ContextVar("video_validation_hashes", default=None)
+
+
+@contextmanager
+def validation_session():
+    if _HASHES.get() is not None:
+        yield
+        return
+    token = _HASHES.set({})
+    try:
+        yield
+    finally:
+        _HASHES.reset(token)
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -19,11 +35,54 @@ def sha256_bytes(value: bytes) -> str:
 
 
 def sha256_file(path: str) -> str:
+    def key():
+        value = os.stat(path)
+        return (
+            os.path.realpath(path),
+            value.st_dev,
+            value.st_ino,
+            value.st_size,
+            value.st_mtime_ns,
+            value.st_ctime_ns,
+        )
+
+    before = key()
+    cache = _HASHES.get()
+    if cache is not None and before in cache:
+        return cache[before]
     digest = hashlib.sha256()
     with open(path, "rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
-    return digest.hexdigest()
+    if key() != before:
+        raise RuntimeError("File changed while hashing: " + os.fspath(path))
+    result = digest.hexdigest()
+    if cache is not None:
+        cache[before] = result
+    return result
+
+
+def python_code_hash(path):
+    """Ignore Python formatting/comments/docstrings, not executable behavior."""
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if (
+            isinstance(
+                node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+            )
+            and node.body
+        ):
+            first = node.body[0]
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                node.body = node.body[1:]
+    return sha256_bytes(ast.dump(tree, include_attributes=False).encode("utf-8"))
 
 
 def read_record(path: str) -> dict[str, Any] | None:

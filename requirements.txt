@@ -1,12 +1,4 @@
-# Supported production runtime: native Python 3.11, FFmpeg/ffprobe, Chrome/Chromium.
-# Use -c requirements.lock.txt to reproduce the verified Windows dependency set.
+# Core video runtime. No local ASR/CUDA model stack is installed here.
+# Reproduce the tested set: pip install -r requirements.txt -c requirements.lock.txt
 playwright>=1.40
 requests>=2.31
-faster-whisper>=1.2
-ctranslate2>=4.8
-# Only the optional background generator requires these two packages.
-moderngl>=5.8
-numpy>=1.24
-# Windows CUDA loaders; the verified CTranslate2 wheel includes its cuDNN DLL.
-nvidia-cublas-cu12; platform_system == "Windows"
-nvidia-cuda-runtime-cu12; platform_system == "Windows"

@@ -15,6 +15,7 @@ UNIVERSAL = [
     "init_project.py",
     "requirements.txt",
     "requirements.lock.txt",
+    "requirements-background.txt",
     "README.md",
     "AGENTS.md",
     ".gitignore",
@@ -71,9 +72,9 @@ def init(target):
             target.rmdir()  # Fails safely if a concurrent writer filled it.
         os.replace(staged, target)
     print(f"[init] new project ready at {target}")
-    print(r"       next: run: pwsh -File .\run.ps1 test")
-    print(r"       then: run: pwsh -File .\run.ps1 doctor")
-    print(r"       optional later: pwsh -File .\run.ps1 doctor-local / doctor-live")
+    print(r"       next: run: pwsh -File .\run.ps1 doctor")
+    print("       then: set PROJECT_TITLE and narration scripts; generate TTS and timing")
+    print(r"       maintenance only: .\run.ps1 test / doctor-local / doctor-live")
     return str(target)
 
 
