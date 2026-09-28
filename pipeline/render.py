@@ -47,6 +47,7 @@ from pipeline.io_utils import (
     positive,
     run as run_process,
 )
+from pipeline.recycle import recycle_generated
 from pathlib import Path
 
 VIDEO_TRACK = os.path.join(config.DIR_OUTPUT, "video_track.mp4")
@@ -113,7 +114,7 @@ def _prepare_resume(identity, output_dir=None, *, preserve_verified=False):
         ]
         for path in stale:
             try:
-                os.remove(path)
+                recycle_generated(path, output_dir)
             except OSError:
                 pass
         remaining = [path for path in stale if os.path.exists(path)]
@@ -123,7 +124,7 @@ def _prepare_resume(identity, output_dir=None, *, preserve_verified=False):
                 + ", ".join(remaining)
             )
         for path in stale:
-            Path(path + ".identity.json").unlink(missing_ok=True)
+            recycle_generated(path + ".identity.json", output_dir)
         write_record(identity_path, identity)
     if stale:
         print(f"[render] discarded {len(stale)} unbound resume chunks")
@@ -559,7 +560,7 @@ def _render_timeline(
             path = os.path.join(config.DIR_OUTPUT, f"_chunk_{i:05d}.mp4")
             try:
                 if os.path.exists(path):
-                    os.remove(path)
+                    recycle_generated(path, config.DIR_OUTPUT)
             except OSError:
                 pass
 
@@ -570,8 +571,8 @@ def _render_timeline(
             bn = os.path.basename(f)
             idx = int(bn.split("_")[2].split(".")[0])
             if idx >= total_chunks:
-                os.remove(f)
-                Path(f + ".identity.json").unlink(missing_ok=True)
+                recycle_generated(f, config.DIR_OUTPUT)
+                recycle_generated(f + ".identity.json", config.DIR_OUTPUT)
         except Exception:
             pass
 
@@ -582,7 +583,7 @@ def _render_timeline(
     ]:
         try:
             if os.path.exists(f):
-                os.remove(f)
+                recycle_generated(f, config.DIR_OUTPUT)
         except OSError:
             pass
 
@@ -697,7 +698,7 @@ def _render_timeline(
             raise RuntimeError(
                 f"stitched track has {got} frames, expected {total_frames}"
             )
-    os.remove(concat_list)
+    recycle_generated(concat_list, config.DIR_OUTPUT)
     # Verified chunks remain reusable; explicit cleanup removes this bounded cache.
     print(f"\n[render] done in {time.time() - t0:.1f}s -> {out_path}")
     return out_path

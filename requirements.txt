@@ -2,3 +2,4 @@
 # Reproduce the tested set: pip install -r requirements.txt -c requirements.lock.txt
 playwright>=1.40
 requests>=2.31
+Send2Trash>=2.1; sys_platform != "win32"

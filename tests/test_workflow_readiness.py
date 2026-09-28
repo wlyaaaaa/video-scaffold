@@ -730,7 +730,7 @@ class GenericProjectTests(unittest.TestCase):
                 )
                 with (
                     mock.patch.object(
-                        render.os, "remove", side_effect=PermissionError("locked")
+                        render, "recycle_generated", side_effect=PermissionError("locked")
                     ),
                     self.assertRaisesRegex(
                         RuntimeError, "stale resume chunks could not be removed"

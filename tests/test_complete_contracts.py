@@ -304,7 +304,7 @@ class AtomicAndRuntimeTests(unittest.TestCase):
             (root / "output" / "_chunk_00000.mp4").write_bytes(b"chunk")
             with (
                 mock.patch.object(
-                    Path, "unlink", side_effect=PermissionError("locked")
+                    cleanup, "recycle_generated", side_effect=PermissionError("locked")
                 ),
                 self.assertRaisesRegex(RuntimeError, "cleanup incomplete"),
             ):

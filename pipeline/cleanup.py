@@ -9,6 +9,7 @@ from fractions import Fraction
 import config
 from pipeline.io_utils import safe_print as print
 from pipeline.io_utils import run
+from pipeline.recycle import recycle_generated
 
 
 def cleanup(keep_srt=True, keep_scene_html=True, *, dry_run=False):
@@ -44,7 +45,7 @@ def cleanup(keep_srt=True, keep_scene_html=True, *, dry_run=False):
     if not dry_run:
         for path in candidates:
             try:
-                path.unlink()
+                recycle_generated(path, path.parent)
                 removed.append(str(path))
             except OSError as error:
                 failed.append({"path": str(path), "error": str(error)})

@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from pipeline.io_utils import safe_print as print
 from pipeline.indexed_files import indexed_basename, indexed_files
+from pipeline.recycle import recycle_generated
 
 DESIGN_RULES = f"""设计契约（必须遵守）：
 - 画布 3840x2160，<svg id="stage"> 内只写静态 SVG 片段，不要写 <html>/<style>/<script>。
@@ -101,7 +102,7 @@ def assemble_all(
     os.makedirs(out_dir, exist_ok=True)
     for path in existing.values():
         if os.path.basename(path) not in expected:
-            os.remove(path)
+            recycle_generated(path, out_dir)
     for output, prompt in prepared:
         with open(output, "w", encoding="utf-8") as f:
             f.write(prompt)

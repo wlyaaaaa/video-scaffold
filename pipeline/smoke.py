@@ -51,6 +51,13 @@ def _browser_acceptance():
                 with page.expect_download() as download:
                     page.locator("#export").click()
                 assert download.value.suggested_filename == "fragment_04.svg"
+                from io import BytesIO
+                from PIL import Image
+
+                with Image.open(BytesIO(page.locator("#frame").screenshot())) as frame:
+                    assert frame.convert("RGB").getpixel((20, 20)) != (255, 255, 255), (
+                        "preview scene obscures the background image"
+                    )
                 page.screenshot(
                     path=str(Path(config.DIR_OUTPUT) / "smoke-preview.png"),
                     full_page=True,
