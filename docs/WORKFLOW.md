@@ -38,7 +38,9 @@
 
 成功分片保留到显式清理，以便增量渲染。只有输入身份、输出哈希、帧数都匹配才复用；局部场景变更仅重建受影响分片，前段时长变化会让受影响的后续时间位置正确失效。
 
-`cleanup --dry-run` 只列计划；`cleanup` 仅删除已知可再生文件，保留原件和未知文件。清理失败会返回错误和残留路径，不显示假成功。
+`cleanup --dry-run` 只列计划；`cleanup` 仅将已知可再生文件移入回收站，保留原件和未知文件。回收失败会返回错误和残留路径，不显示假成功，也不会退回永久删除。
+
+Linux/macOS 使用 Send2Trash。Windows 保留既有受信 PowerShell 回收助手协议；用 `VIDEO_RECYCLE_TOOL` 指定已审核助手的绝对路径。未指定时，仅兼容已存在的 `E:\.agents\tools\Move-TaskItemToRecycleBin.ps1`，不会自动下载或搜索其他脚本；指定无效路径时也不会回退。助手接受 `-LiteralPath`、`-AllowedRoot` 和 `-Json`，成功须返回 `{"status":"recycled"}` 且原路径消失。助手必须保证不能回收时失败，不得永久删除。新 Windows 机器没有该助手时，真实清理会明确报错；先配置受信助手再执行。
 
 ## 有声审阅与 cue
 
@@ -76,11 +78,11 @@ verify 检查完整来源链、视频与音频流、画布、编码、帧率、�
 
 smoke 默认使用明确的 CPU H.264 测试配置，`smoke --gpu` 使用生产编码器，不存在 GPU 失败后的静默降级。样例生成两段明确标注的合成测试音，运行有声预览与完整交付，然后改一场景验证旧成片被拒绝、部分分片复用。`--target <空目录>` 保留隔离样例，否则结束清理临时样例。真实云端测试需显式 --live-fish 和环境变量密钥，不复制原工程密钥文件。
 
-持续集成配置包含 Windows/Linux 逻辑测试及 Linux CPU 完整短片，不使用个人配置、真实 Fish 账户或任何 ASR 模型权重。源码测试、本机安装、硬件实测、云端链路、持续集成和人工观看各自提供证据，不互相冒充。
+持续集成配置包含 Windows/Linux 逻辑测试及 Linux CPU 完整短片，不使用个人配置、真实 Fish 账户或任何 ASR 模型权重。Windows 逻辑测试用隔离移动夹具模拟系统回收后端，并验证助手调用和失败协议，不证明真实系统回收可用；真实 Windows 集成需在已配置受信助手的机器上另跑 smoke。Linux CPU smoke 使用真实 Send2Trash。源码测试、本机安装、硬件实测、云端链路、持续集成和人工观看各自提供证据，不互相冒充。
 
 ## 最小依赖与使用边界
 
-核心 Python 依赖只有 requests/Playwright 及其依赖；背景生成器依赖放在 requirements-background.txt。本地识别、对齐模型和 CUDA 依赖由 ChineseASR 独立维护，不在每个视频工程重复安装。`durations` 只探测音频，chapters 只使用场景 ID、时长及章节定义，不依赖词轴；字幕、触发动画才需要词级时间。
+核心 Python 依赖为 requests、Playwright、非 Windows 回收所需的 Send2Trash，以及图像读取和隔离预览验收所需的 Pillow；CI 和本地均从 requirements.txt 配合 requirements.lock.txt 安装。背景生成器依赖放在 requirements-background.txt。本地识别、对齐模型和 CUDA 依赖由 ChineseASR 独立维护，不在每个视频工程重复安装。`durations` 只探测音频，chapters 只使用场景 ID、时长及章节定义，不依赖词轴；字幕、触发动画才需要词级时间。
 
 共享对齐使用 `python -m zh_asr align`，调用既有 broker/supervisor，300 秒单场上限与显式执行超时。它对已知文案定位，不证明配音没有漏读、错读或代词；需文字复核时另用 ChineseASR 识别能力，不默认加双模型处理。LocalOCR 仅供素材文字读取，不用 OCR 重新识别自己生成的 SVG。
 

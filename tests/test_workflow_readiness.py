@@ -20,6 +20,8 @@ sys.modules["secret_local"] = _SECRET_STUB
 
 ROOT = Path(__file__).resolve().parents[1]
 
+from helpers import windows_recycle_fixture
+
 
 class CueAuditTests(unittest.TestCase):
     def test_missing_timeline_does_not_silently_drop_cues(self) -> None:
@@ -301,6 +303,7 @@ class GenericProjectTests(unittest.TestCase):
                 self.assertIn(assets[position % 2].resolve().as_uri(), prompt)
             self.assertFalse((prompts / "prompt_02.txt").exists())
 
+    @windows_recycle_fixture()
     def test_author_removes_only_canonical_stale_prompts_on_rerun(self) -> None:
         from pipeline import author
 
@@ -695,6 +698,7 @@ class GenericProjectTests(unittest.TestCase):
                 transcribe.transcribe_batch(str(audio), str(timelines), force=True)
                 transcribe_one.assert_called_once()
 
+    @windows_recycle_fixture()
     def test_render_resume_identity_discards_only_chunks_from_changed_inputs(
         self,
     ) -> None:
@@ -738,6 +742,7 @@ class GenericProjectTests(unittest.TestCase):
                 ):
                     render._prepare_resume(changed_again, str(output))
 
+    @windows_recycle_fixture()
     def test_render_resume_identity_tracks_file_uri_resource_bytes(self) -> None:
         from pipeline import render
 

@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager, ExitStack
 import json
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -9,6 +10,31 @@ from unittest import mock
 import config
 from pipeline import contracts, durations, fish_tts, transcribe, workflow
 from pipeline.artifact_identity import write_output_record
+
+
+@contextmanager
+def windows_recycle_fixture():
+    """Simulate only the Windows host helper, retaining files in an isolated bin.
+
+    This is a unit fixture, not evidence of native Windows recycling. Linux
+    keeps using the real Send2Trash backend, also exercised by CPU smoke.
+    """
+    if os.name != "nt":
+        yield
+        return
+    from pipeline import recycle
+
+    with tempfile.TemporaryDirectory() as temporary:
+        retained = Path(temporary)
+        moved = 0
+
+        def move(target, _root):
+            nonlocal moved
+            moved += 1
+            target.rename(retained / f"{moved}-{target.name}")
+
+        with mock.patch.object(recycle, "_recycle_windows", side_effect=move):
+            yield
 
 
 @contextmanager

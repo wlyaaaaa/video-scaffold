@@ -33,7 +33,7 @@ from pipeline.io_utils import (
     concat_entry,
     encoder_process,
 )
-from helpers import project_graph, media_probe
+from helpers import project_graph, media_probe, windows_recycle_fixture
 
 
 class CueTests(unittest.TestCase):
@@ -287,6 +287,7 @@ class AtomicAndRuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             concat_entry("bad\npath.mp3")
 
+    @windows_recycle_fixture()
     def test_cleanup_dry_run_preserves_unknown_and_known(self):
         with project_graph() as root:
             known = root / "output" / "_chunk_00000.mp4"
