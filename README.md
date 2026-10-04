@@ -7,3 +7,5 @@
 5. 让 AI 做什么：检查素材来源、制作和检查本期视频；选题和是否投稿由我决定。
 
 安装、命令和恢复见 [制作流程](docs/WORKFLOW.md)，画面写法见 [创作指南](docs/AUTHORING.md)，配音见 [配音指南](docs/VOICE.md)。
+
+网页作品另有独立 [webfilm 入口](webfilm/README.md)：给模型同一份 [公平约定](webfilm/CONTRACT.md)、创作要求和工具，各自生成第一版，经 render、review 后修改一次，保留前后版本。它支持代码动画、互动录屏、知识卡片、片头片尾、封面、版本比较和后期打包，整目录可搬走；普通网页 discover/capture 和自行导出 MP4 是附加能力。水彩 demo 是 AI 补充的渲染验收材料，虚构彩排作者未代表实际模型比赛。

@@ -35,6 +35,7 @@ video-scaffold-backup.zip
 /.video-workflow.lock
 .cache/
 *.log
+.webfilm-tmp/
 
 # claude code local settings
 .claude/
