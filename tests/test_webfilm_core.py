@@ -89,5 +89,17 @@ class WebfilmCoreTests(unittest.TestCase):
             self.assertEqual(result[1]["reused_from"]["soundtrack_sha256"], sha256(wav))
             self.assertIsNone(reusable_soundtrack(root, {"files": [{"path": "index.html", "sha256": "changed"}]},
                                                  {"duration": 20}, 1920, 1080, None, "test", False))
+            record.update(capture_mode="external webpage clock", seed=829, entrypoint="a.html")
+            write_json(str(video) + ".json", record)
+            self.assertIsNotNone(reusable_soundtrack(root, {"files": files}, {"duration": 20, "seed": 829, "entry": "a.html"},
+                                                    1920, 1080, None, "test", True))
+            self.assertIsNone(reusable_soundtrack(root, {"files": files}, {"duration": 20, "seed": 829, "entry": "b.html"},
+                                                 1920, 1080, None, "test", True))
+            record.pop("entrypoint")
+            write_json(str(video) + ".json", record)
+            self.assertIsNone(reusable_soundtrack(root, {"files": files}, {"duration": 20, "seed": 829, "entry": "a.html"},
+                                                 1920, 1080, None, "test", True))
             wav.write_bytes(b"replaced master")
+            record.pop("capture_mode")
+            write_json(str(video) + ".json", record)
             self.assertIsNone(reusable_soundtrack(root, {"files": files}, {"duration": 20}, 1920, 1080, None, "test", False))

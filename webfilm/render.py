@@ -41,6 +41,8 @@ def reusable_soundtrack(parent, report, config, width, height, actions_hash, chr
                 continue
             if generic and identity.get("seed") != config.get("seed", 829):
                 continue
+            if generic and identity.get("entrypoint") != config.get("entry", "index.html"):
+                continue
             if identity.get("action_script_sha256") != actions_hash or identity.get("work", {}).get("files") != report["files"]:
                 continue
             if identity.get("work", {}).get("pass") is not True:
@@ -345,6 +347,7 @@ def render_work(folder, output_path, *, width=3840, height=2160, fps=60, actions
                 "frames_sha256": sha256(frame_sidecar), "action_script_sha256": actions_hash,
                 "capture_mode": "external webpage clock" if generic else "optional explicit-time work API",
                 "seed": config.get("seed", 829),
+                "entrypoint": config.get("entry", "index.html"),
                 "elapsed_seconds": round(time.monotonic()-elapsed, 3), "probe": info}
     write_json(sidecar, identity)
     return identity
