@@ -10,6 +10,7 @@ import unittest
 
 from PIL import Image
 
+from helpers import windows_recycle_fixture
 from webfilm import media
 from webfilm.common import probe, run, sha256, temp_workspace, tool, write_json
 from webfilm.package import package_site, upload_template
@@ -55,6 +56,9 @@ def tone_energy(samples, hz, sample_rate=48000):
 
 
 class WebfilmPackageTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(windows_recycle_fixture())
+
     def test_package_preserves_versions_assets_and_model_prompt(self):
         with fixture() as root:
             first = root / "第一版 #1.html"
@@ -135,6 +139,9 @@ class WebfilmPackageTests(unittest.TestCase):
 
 @unittest.skipUnless(available_media_tools(), "FFmpeg and FFprobe are required for CPU media integration")
 class WebfilmMediaTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(windows_recycle_fixture())
+
     def test_short_narration_keeps_its_speed_pads_silence_and_preserves_eligible_picture(self):
         with fixture() as root:
             source, narration = root / "card.mp4", root / "short.wav"

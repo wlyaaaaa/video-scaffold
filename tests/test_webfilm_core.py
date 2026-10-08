@@ -3,12 +3,16 @@ import json
 from pathlib import Path
 import unittest
 
+from helpers import windows_recycle_fixture
 from webfilm.check import check_work, load_work
 from webfilm.common import sha256, temp_workspace, write_json
 from webfilm.render import compare_renders, frame_count, load_actions, reusable_soundtrack
 
 
 class WebfilmCoreTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(windows_recycle_fixture())
+
     def work(self, root, body="<p>local page</p>"):
         root.mkdir()
         write_json(root / "work.json", {"schema": 1, "entry": "index.html", "duration": 20, "audio": "none"})

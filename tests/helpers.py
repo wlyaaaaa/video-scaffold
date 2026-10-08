@@ -23,17 +23,24 @@ def windows_recycle_fixture():
         yield
         return
     from pipeline import recycle
+    from webfilm import common as webfilm_common
 
     with tempfile.TemporaryDirectory() as temporary:
         retained = Path(temporary)
         moved = 0
 
-        def move(target, _root):
+        def move(target, root):
             nonlocal moved
+            target, root = Path(target).resolve(), Path(root).resolve()
+            if not target.is_relative_to(root) or target == root:
+                raise ValueError("Test recycle target must be inside its temporary root")
+            if not target.exists():
+                return
             moved += 1
-            target.rename(retained / f"{moved}-{target.name}")
+            shutil.move(str(target), str(retained / f"{moved}-{target.name}"))
 
-        with mock.patch.object(recycle, "_recycle_windows", side_effect=move):
+        with mock.patch.object(recycle, "_recycle_windows", side_effect=move), \
+                mock.patch.object(webfilm_common, "recycle", side_effect=move):
             yield
 
 

@@ -5,6 +5,7 @@ import struct
 import unittest
 import wave
 
+from helpers import windows_recycle_fixture
 from webfilm.common import read_json, sha256, temp_workspace, write_json
 from webfilm.render import compare_renders, crop_pcm, frame_range, render_stills, render_work, reusable_soundtrack
 
@@ -19,6 +20,9 @@ def write_pcm(path, seconds=1):
 
 
 class PreviewTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(windows_recycle_fixture())
+
     def test_range_uses_original_frame_grid_and_rejects_invalid_values(self):
         self.assertEqual(frame_range(20), (0, 1200))
         self.assertEqual(frame_range(20, 60, 1.5, 3), (90, 180))
