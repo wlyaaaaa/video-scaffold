@@ -464,11 +464,11 @@ def compare_renders(left, right):
             "scope": "Every captured RGB frame and offline PCM WAV, bound to current output bytes; MP4s are byte-identical or decoded frame-by-frame. Fixed installed Chrome and host."}
 
 
-def render_stills(folder, output_dir, *, at, width=3840, height=2160, actions_path=None):
+def render_stills(folder, output_dir, *, at, width=3840, height=2160, actions_path=None, max_duration=120):
     """Sample CONTRACT works with the same clock and action replay as render."""
     dimensions(width, height, 60)
-    root, config = load_work(folder)
-    report = check_work(root)
+    root, config = load_work(folder, max_duration=max_duration)
+    report = check_work(root, max_duration=max_duration)
     if not report["pass"]:
         raise ValueError("Static work rules failed: " + "; ".join(report["errors"]))
     if not at:
@@ -521,7 +521,7 @@ def render_stills(folder, output_dir, *, at, width=3840, height=2160, actions_pa
             assert_runtime(page, runtime)
             runtime_evidence = {key: value for key, value in runtime.items() if key != "origin"}
             runtime_evidence.update(requests=sorted(set(runtime["requests"])), action_log=actor.log)
-        if report["files"] != check_work(root)["files"] or (actions_path and actions_hash != sha256(actions_path)):
+        if report["files"] != check_work(root, max_duration=max_duration)["files"] or (actions_path and actions_hash != sha256(actions_path)):
             raise RuntimeError("Original inputs changed while sampling; refusing stale source binding")
         sheet.save(staged / "contact-sheet.png")
         report.update(scope="static + sampled runtime stills", runtime=runtime_evidence)

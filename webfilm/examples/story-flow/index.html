@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>从想法，到表达</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#f5f3e9}
+canvas{display:block;width:100vw;height:100vh}
+button{position:fixed;right:24px;bottom:24px;border:0;border-radius:28px;padding:14px 24px;
+font:600 16px "Microsoft YaHei",sans-serif;background:#173f32;color:#f5f3e9;cursor:pointer}
+button:focus-visible{outline:3px solid #b38b4d;outline-offset:4px}
+</style>
+</head>
+<body>
+<canvas id="film" aria-label="一颗圆点穿过想法、结构、节奏，最后成为一段作品的原创代码短片"></canvas>
+<button id="play" type="button">播放有声短片</button>
+<script>
+"use strict";
+const canvas=document.getElementById("film"),ctx=canvas.getContext("2d");
+const W=1920,H=1080,DURATION=24,TAU=Math.PI*2;
+const C={paper:"#f5f3e9",ink:"#163d30",green:"#28664b",muted:"#63766a",line:"#d6ded1",light:"#d9edb0"};
+const font='"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif';
+const clamp=x=>Math.max(0,Math.min(1,x));
+const ease=x=>{x=clamp(x);return x*x*(3-2*x);};
+const mix=(a,b,x)=>a+(b-a)*x;
+const spring=x=>x<=0?0:1-Math.exp(-7*x)*(Math.cos(7*x)+Math.sin(7*x));
+const fade=(t,start,end)=>ease((t-start)/.55)*(1-ease((t-end)/.45));
+function circle(x,y,r,fill,stroke,width=2){
+  if(r<=0)return;ctx.beginPath();ctx.arc(x,y,r,0,TAU);
+  if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=width;ctx.stroke();}
+}
+function line(points,color,width=3){
+  ctx.beginPath();points.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));
+  ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineCap="round";ctx.lineJoin="round";ctx.stroke();
+}
+function text(value,x,y,size=44,color=C.ink,weight=500,align="left"){
+  ctx.font=weight+" "+size+"px "+font;ctx.fillStyle=color;ctx.textAlign=align;
+  ctx.textBaseline="alphabetic";ctx.fillText(value,x,y);
+}
+function rounded(x,y,w,h,r,fill,stroke){
+  ctx.beginPath();ctx.roundRect(x,y,w,h,r);
+  if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=3;ctx.stroke();}
+}
+function header(dark=false){
+  text("从想法，到表达",128,126,36,dark?C.paper:C.muted,600);
+  ctx.globalAlpha=.35;line([[128,174],[1792,174]],dark?C.light:C.line,2);ctx.globalAlpha=1;
+}
+function caption(t,lines,sub,dark=false,top=386){
+  const appear=ease(t/.65),ink=dark?C.paper:C.ink;
+  ctx.save();ctx.globalAlpha*=appear;ctx.translate(0,24*(1-appear));
+  lines.forEach((v,i)=>text(v,128,top+i*132,108,ink,700));
+  if(sub)text(sub,132,top+lines.length*132+48,42,dark?"#b7cbbb":C.muted,400);
+  ctx.restore();
+}
+function progress(t,dark=false){
+  const labels=["想法","结构","节奏","表达"],color=dark?C.light:C.green;
+  const y=950;
+  labels.forEach((label,i)=>{
+    const x=128+i*432,done=clamp((t-i*6)/6);
+    line([[x,y],[x+330,y]],dark?"#3f5d48":C.line,3);
+    if(done>0)line([[x,y],[x+330*done,y]],color,5);
+    text(label,x,1006,34,t>=i*6?(dark?C.paper:C.ink):(dark?"#839c88":"#8c9b8d"),500);
+  });
+}
+function drawIdea(t){
+  header();
+  ctx.save();ctx.globalAlpha=1-ease((t-4.9)/.75);
+  caption(t,["先找到","一个想法。"],"视线有了起点，画面才有方向。");
+  ctx.restore();
+  const a=ease((t-4.8)/1.2),x=mix(1400,360,a),y=mix(548,620,a);
+  const radius=mix(184*Math.max(0,spring((t-.2)/1.8)),24,a);
+  const orbit=1-ease((t-3.6)/1.5);
+  const scraps=[["问题",1190,304,-.07],["线索",1610,430,.07],["答案",1270,790,.035]];
+  scraps.forEach(([word,sx,sy,angle],i)=>{
+    const gather=ease((t-2.4-i*.12)/1.8);
+    ctx.save();ctx.globalAlpha=fade(t,.3+i*.2,4.1)*(1-gather*.75);
+    ctx.translate(mix(sx,1400,gather),mix(sy,548,gather));ctx.rotate(angle*(1-gather));
+    text(word,0,0,46,C.muted,500,"center");
+    line([[-64,22],[64,22]],C.line,3);ctx.restore();
+  });
+  ctx.save();ctx.globalAlpha=.45*orbit;
+  circle(1400,548,252,null,C.line,2);circle(1400,548,304,null,C.line,2);ctx.restore();
+  circle(x,y,radius,C.ink);
+  const center=ease((t-.65)/1.2)*(1-a);
+  ctx.save();ctx.globalAlpha=center;circle(x,y,13,C.light);
+  line([[x-56,y],[x+56,y]],C.light,3);line([[x,y-56],[x,y+56]],C.light,3);ctx.restore();
+}
+function routePoint(p){return [360+1200*p,620+Math.sin(p*TAU)*92];}
+function drawStructure(t){
+  header();
+  ctx.save();ctx.globalAlpha=1-ease((t-10.7)/.8);
+  const visible=ease((t-6)/.65);
+  ctx.globalAlpha*=visible;text("把线索，连成主线。",128,338,100,C.ink,700);
+  text("让上一镜的动作，带出下一镜的内容。",132,424,42,C.muted,400);
+  const p=ease((t-6)/4.8),all=[],active=[];
+  for(let i=0;i<=180;i++){const q=i/180;all.push(routePoint(q));if(q<=p)active.push(routePoint(q));}
+  line(all,C.line,5);if(active.length)line(active,C.green,7);
+  [["输入",0],["组织",.5],["呈现",1]].forEach(([word,at],i)=>{
+    const [x,y]=routePoint(at),on=ease((p-at+.025)*14);
+    circle(x,y,13+on*9,on?C.green:C.paper,C.green,3);
+    text(word,x,825,48,on?C.ink:C.muted,600,"center");
+    if(i===1&&p>.34&&p<.86){
+      ctx.save();ctx.globalAlpha=Math.sin((p-.34)/.52*Math.PI)*.45;
+      circle(x,y,56+on*28,null,C.green,2);ctx.restore();
+    }
+  });
+  ctx.restore();
+  const [x,y]=routePoint(p);circle(x,y,24,C.ink);circle(x,y,7,C.light);
+  // The travelling point becomes the surface of the next scene.
+  if(t>=10.9){
+    const wipe=ease((t-10.9)/1.1);
+    circle(mix(1560,1410,wipe),620,24+2200*wipe,C.ink);
+  }
+}
+function drawRhythm(t){
+  header(true);
+  ctx.save();ctx.globalAlpha=1-ease((t-16.9)/.75);
+  caption(t-12,["让变化，","落在节拍上。"],"动作与声音，在同一刻发生。",true);
+  const cx=1420,cy=552,age=(t-12)%.5,pulse=Math.exp(-age*10),r=202;
+  circle(cx,cy,r,null,"#668261",3);circle(cx,cy,r+35+12*pulse,null,"#365b42",2);
+  for(let i=0;i<32;i++){
+    const angle=i*TAU/32-Math.PI/2;
+    const phase=(t-12)*2-i/8,level=(.5+.5*Math.sin(phase*Math.PI))*Math.exp(-age*3);
+    const r0=r+18,r1=r0+15+level*22;
+    line([[cx+Math.cos(angle)*r0,cy+Math.sin(angle)*r0],
+          [cx+Math.cos(angle)*r1,cy+Math.sin(angle)*r1]],i%8===0?C.light:"#78976b",i%8===0?5:3);
+  }
+  for(let i=0;i<5;i++){
+    const h=40+(.45+.55*Math.cos((i-2)*.8))*96*pulse;
+    rounded(cx-106+i*46,cy-h/2,28,h,14,C.light);
+  }
+  text("一起发生",cx,875,48,C.paper,500,"center");
+  ctx.restore();
+  if(t>=16.9){
+    const wipe=ease((t-16.9)/1.1);
+    circle(1420,552,13+2200*wipe,C.paper);
+  }
+}
+function filmWindow(t,x,y,w,h){
+  rounded(x,y,w,h,28,C.ink);
+  if(w<160)return;
+  ctx.save();ctx.beginPath();ctx.roundRect(x+3,y+3,w-6,h-6,25);ctx.clip();
+  const start=x+64,end=x+w-64,mid=y+h*.53,p=ease(clamp((t-18.8)/2.8));
+  line([[start,mid],[end,mid]],"#6b8a61",3);
+  for(let i=0;i<3;i++)circle(mix(start,end,i/2),mid,10,C.light);
+  circle(mix(start,end,p),mid,24,C.paper);
+  circle(mix(start,end,p),mid,6,C.green);
+  text("想法",start,mid+90,36,C.light,500,"center");
+  text("表达",end,mid+90,36,C.light,500,"center");
+  ctx.restore();
+}
+function drawFinish(t){
+  header();
+  caption(t-18,["把想法，","做成作品。"],"先看关键几秒，再看完整表达。");
+  const a=ease((t-18)/.8),w=mix(34,640,a),h=mix(34,420,a);
+  filmWindow(t,1410-w/2,530-h/2,w,h);
+  ctx.save();ctx.globalAlpha=a;
+  const p=clamp((t-19)/3.5);
+  line([[1120,798],[1700,798]],C.line,3);
+  line([[1120,798],[1120+580*p,798]],C.green,5);
+  circle(1120+580*p,798,8,C.ink);
+  text("一个镜头，也值得认真看。",1410,870,36,C.muted,400,"center");
+  ctx.restore();
+}
+function render(seconds){
+  const t=Math.max(0,Math.min(DURATION,Number(seconds)||0));
+  const width=window.innerWidth,height=window.innerHeight;
+  if(canvas.width!==width||canvas.height!==height){canvas.width=width;canvas.height=height;}
+  ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.fillStyle=C.paper;ctx.fillRect(0,0,width,height);
+  const scale=Math.min(width/W,height/H);
+  ctx.setTransform(scale,0,0,scale,(width-W*scale)/2,(height-H*scale)/2);
+  const dark=t>=12&&t<18;
+  ctx.fillStyle=dark?C.ink:C.paper;ctx.fillRect(0,0,W,H);
+  if(t<6)drawIdea(t);else if(t<12)drawStructure(t);else if(t<18)drawRhythm(t);else drawFinish(t);
+  progress(t,dark);
+}
+function audio(context){
+  const master=context.createGain();
+  master.gain.setValueAtTime(0,0);master.gain.linearRampToValueAtTime(.65,.06);
+  master.gain.setValueAtTime(.65,22.5);master.gain.linearRampToValueAtTime(0,24);
+  master.connect(context.destination);
+  const hz=midi=>440*Math.pow(2,(midi-69)/12);
+  function note(at,midi,length,amount,type="sine",pan=0){
+    const osc=context.createOscillator(),gain=context.createGain(),stereo=context.createStereoPanner();
+    osc.type=type;osc.frequency.value=hz(midi);stereo.pan.value=pan;
+    gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(amount,at+.012);
+    gain.gain.exponentialRampToValueAtTime(.0001,at+length);
+    osc.connect(gain);gain.connect(stereo);stereo.connect(master);osc.start(at);osc.stop(at+length+.02);
+  }
+  let seed=829;
+  const noise=context.createBuffer(1,Math.round(context.sampleRate*.35),context.sampleRate);
+  const samples=noise.getChannelData(0);
+  for(let i=0;i<samples.length;i++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;samples[i]=(seed/4294967296)*2-1;}
+  function air(at,length,amount,cutoff){
+    const source=context.createBufferSource(),gain=context.createGain(),filter=context.createBiquadFilter();
+    source.buffer=noise;filter.type="highpass";filter.frequency.value=cutoff;
+    gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(amount,at+.008);
+    gain.gain.exponentialRampToValueAtTime(.0001,at+length);
+    source.connect(filter);filter.connect(gain);gain.connect(master);source.start(at);source.stop(at+length+.01);
+  }
+  const melody=[72,79,76,74,72,67,69,76],roots=[48,45,53,48];
+  for(let beat=0;beat<48;beat++){
+    const at=beat*.5,section=Math.floor(at/6),midi=melody[beat%8];
+    note(at,midi,.42,beat%4===0?.14:.09,"sine",Math.sin(beat*1.7)*.22);
+    note(at,midi+12,.19,.019,"triangle");
+    if(beat%4===0){note(at,roots[section],1.25,.1);note(at,roots[section]+7,1,.038);}
+    if(beat%2===0){note(at,36,.14,.15);air(at+.25,.055,.024,6500);}
+    if(at>=12&&at<18)air(at,.055,.04,3200);
+  }
+  [5.7,11.7,17.7].forEach(at=>air(at,.3,.045,1800));
+}
+window.webfilm={duration:DURATION,render,audio};
+const play=document.getElementById("play");
+if(window.__WEBFILM_CAPTURE__){play.hidden=true;}else{
+  render(0);
+  let context=null,playing=false,clock=0;
+  function tick(now){
+    if(!playing)return;
+    const t=(now-clock)/1000;render(t);
+    if(t<DURATION)requestAnimationFrame(tick);
+    else{playing=false;play.textContent="重播有声短片";play.hidden=false;}
+  }
+  play.addEventListener("click",async()=>{
+    if(context)await context.close();
+    context=new AudioContext({sampleRate:48000});await context.resume();audio(context);
+    playing=true;clock=performance.now()-context.currentTime*1000;play.hidden=true;requestAnimationFrame(tick);
+  });
+  window.addEventListener("resize",()=>{if(!playing)render(0);});
+}
+</script>
+</body>
+</html>

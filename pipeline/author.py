@@ -8,8 +8,8 @@ that the model returns a small fragment, not a full animated document - fast and
 on-spec. The script + word timeline + asset name are injected so the model can
 cue animations to the narration.
 
-This module assembles + saves the prompt. Wire `generate()` to your LLM of
-choice (e.g. the Anthropic API) to close the loop into scene_html/scene_NN.html.
+This module assembles and saves the prompt. The current AI or a person writes
+the fragment; no separate model service is needed for this workflow.
 """
 
 import os
@@ -35,8 +35,8 @@ ANIMATION_GUIDE = """可用动画（data-anim + data-delay/data-dur 秒）：
   type(逐字) / fade / fade-up / fade-left / fade-right / zoom /
   draw(描边生长，箭头用 marker-end="url(#arrow)") / count(数字滚动: data-to,data-decimals) /
   float(无重力悬浮，持续)
-音画同步：用 data-cue="旁白里的原词" 代替 data-delay，元素会在念到该词的那一帧才动。
-只能 cue 旁白里真实说出的词（不是屏幕上的数字）。"""
+音画同步：用 data-cue="旁白里的原词" 绑定现有词轴中的估计时间，再通过有声预览检查。
+只能 cue 旁白里真实说出的词（不是屏幕上的数字）。完整动画与参数见 docs/AUTHORING.md 和 docs/ADVANCED_FX.md。"""
 
 
 def _transcript(srt_path):
@@ -59,6 +59,9 @@ def build_prompt(script_text, srt_path, asset_path=None):
     else:
         asset_guide = "【本场景可用素材】无（不要虚构素材路径）"
     return f"""你是顶级动态信息图设计师。请为下面这一段旁白设计「一个场景」的前景 SVG 片段。
+
+先结合本工程 docs/AUTHORING.md 选择能讲清内容的画面：让明确的主体发生有意义的变化，
+按内容选流程、结构、比例或关系等表达；文字服务于画面，不把整段旁白搬上屏幕。
 
 【旁白文案】
 {script_text}
@@ -113,9 +116,8 @@ def assemble_all(
 
 
 def generate(prompt):
-    """HOOK: send `prompt` to your LLM and return the raw SVG fragment string.
-    Left unwired so the scaffold runs offline; plug in the Anthropic API here."""
-    raise NotImplementedError("Wire an LLM here to auto-generate scene fragments.")
+    """Reserved compatibility entry; the active workflow uses AI-authored SVG."""
+    raise NotImplementedError("Use the current AI or a person to author the scene SVG fragment.")
 
 
 if __name__ == "__main__":

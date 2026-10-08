@@ -35,6 +35,7 @@ def parser():
     stills.add_argument("--at", nargs="+", type=float, required=True, help="源作品绝对秒数，须在60fps帧边界")
     stills.add_argument("--1080p", action="store_true")
     stills.add_argument("--actions")
+    stills.add_argument("--max-duration", type=float, default=120)
     capture = tasks.add_parser("capture", help="从外部驱动普通网页，无需修改源码或使用本工具接口")
     capture.add_argument("folder")
     capture.add_argument("output")
@@ -113,7 +114,7 @@ def main(argv=None):
             from .render import render_stills
             width, height = (1920, 1080) if arguments.__dict__["1080p"] else (3840, 2160)
             result = render_stills(arguments.work, arguments.output, at=arguments.at, width=width, height=height,
-                                   actions_path=arguments.actions)
+                                   actions_path=arguments.actions, max_duration=arguments.max_duration)
             result = {key: result[key] for key in ("schema", "source_duration", "sample_times", "width", "height", "files", "contact_sheet")}
         elif command == "compare":
             from .render import compare_renders
