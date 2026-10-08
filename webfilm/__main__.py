@@ -21,12 +21,20 @@ def parser():
     check.add_argument("work")
     check.add_argument("--output")
     check.add_argument("--max-duration", type=float, default=120)
-    render = tasks.add_parser("render", help="完整运行检查、逐帧渲染和离线程序音乐")
+    render = tasks.add_parser("render", help="逐帧渲染与离线程序音乐，可选绝对时间片段")
     render.add_argument("work")
     render.add_argument("output")
     render.add_argument("--1080p", action="store_true")
     render.add_argument("--actions")
     render.add_argument("--max-duration", type=float, default=120)
+    render.add_argument("--start", type=float, default=0, help="源作品起点秒数，包含，须在60fps帧边界")
+    render.add_argument("--end", type=float, help="源作品终点秒数，不包含，默认作品末尾")
+    stills = tasks.add_parser("stills", help="直接采样作品关键帧，并生成带秒数的小拼图")
+    stills.add_argument("work")
+    stills.add_argument("output")
+    stills.add_argument("--at", nargs="+", type=float, required=True, help="源作品绝对秒数，须在60fps帧边界")
+    stills.add_argument("--1080p", action="store_true")
+    stills.add_argument("--actions")
     capture = tasks.add_parser("capture", help="从外部驱动普通网页，无需修改源码或使用本工具接口")
     capture.add_argument("folder")
     capture.add_argument("output")
@@ -95,11 +103,18 @@ def main(argv=None):
         elif command in ("render", "capture"):
             from .render import render_work
             width, height = (1920, 1080) if arguments.__dict__["1080p"] else (3840, 2160)
-            extra = {"generic": True, "entry": arguments.entry, "duration": arguments.duration, "seed": arguments.seed} if command == "capture" else {}
+            extra = ({"generic": True, "entry": arguments.entry, "duration": arguments.duration, "seed": arguments.seed}
+                     if command == "capture" else {"start": arguments.start, "end": arguments.end})
             result = render_work(arguments.folder if command == "capture" else arguments.work, arguments.output, width=width, height=height,
                                  actions_path=arguments.actions, max_duration=arguments.max_duration, **extra)
             # The complete inventory and 1200 hashes stay in the sidecars.
-            result = {key: result[key] for key in ("schema", "width", "height", "fps", "duration", "frame_count", "elapsed_seconds", "output_sha256")}
+            result = {key: result[key] for key in ("schema", "width", "height", "fps", "duration", "source_duration", "source_range", "frame_count", "elapsed_seconds", "output_sha256")}
+        elif command == "stills":
+            from .render import render_stills
+            width, height = (1920, 1080) if arguments.__dict__["1080p"] else (3840, 2160)
+            result = render_stills(arguments.work, arguments.output, at=arguments.at, width=width, height=height,
+                                   actions_path=arguments.actions)
+            result = {key: result[key] for key in ("schema", "source_duration", "sample_times", "width", "height", "files", "contact_sheet")}
         elif command == "compare":
             from .render import compare_renders
             result = compare_renders(arguments.left, arguments.right)
