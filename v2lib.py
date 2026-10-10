@@ -86,10 +86,12 @@ def img_dims(name):
 DIMS = {}
 
 # ---- timing helper: cue first, data-delay fallback ------------------------
-def _t(cue, delay, dur=None):
+def _t(cue, delay, dur=None, offset=None, index=None):
     import html
     cue = html.escape(str(cue), quote=True) if cue else cue
     a = f'data-cue="{cue}" data-delay="{delay:.2f}"' if cue else f'data-delay="{delay:.2f}"'
+    if cue and index and index != 1: a += f' data-cue-index="{int(index)}"'
+    if cue and offset: a += f' data-cue-offset="{offset:.3f}"'
     if dur is not None: a += f' data-dur="{dur}"'
     return a
 
@@ -670,3 +672,463 @@ def gauge(value, lo=0, hi=100, x=CX, y=1240, r=420, cue=None, delay=0.4, title="
                f'<circle cx="{Ln}" cy="0" r="2" fill="{needle_color}" fill-opacity="0"/></g>'
                f'<circle cx="0" cy="0" r="24" fill="{needle_color}"/></g>')
     return "".join(out)
+
+
+# ---- 图文页（page）：一张页上，元素按念到的词一个个进来、进来就停住 -------------------
+# 颜色、字体、间距和字幕样式只在 config.PAGE_THEMES 一处定义；这里每次调用时读当前主题，
+# 换主题（config.PAGE_THEME 或 use_theme）不改组件。颜色参数可写主题角色名
+# （page/ink/accent/muted/faint/rule/block/pen）或 #RRGGBB；字体参数可写 heavy/sans/mono/hand
+# 或完整 font-family。文字参数可传字符串，或 [("普通", None), ("重点", "accent")] 分段上色。
+# 时刻参数 timings 每项是 (cue, offset) 或数字 delay。用法见 docs/AUTHORING.md“图文页”。
+_ROLES = ("page", "ink", "accent", "muted", "faint", "rule", "block", "pen", "shadow")
+_FONTS = ("heavy", "sans", "mono", "hand")
+# “正”字计数的五笔（100×100 方格，按书写顺序）
+ZHENG_STROKES = (
+    "M12 10 C40 7 66 8 90 9",
+    "M51 10 C51 38 50 66 51 92",
+    "M52 50 C62 49 72 49 82 50",
+    "M24 42 C24 58 24 76 25 92",
+    "M4 93 C36 91 66 91 97 92",
+)
+
+
+def theme(name=None):
+    """当前（或指定）图文页主题 dict，来自 config.PAGE_THEMES。"""
+    t = config.PAGE_THEME if name is None else name
+    if isinstance(t, dict):
+        return t
+    try:
+        return config.PAGE_THEMES[t]
+    except KeyError:
+        raise KeyError(f"unknown page theme {t!r}; known: {', '.join(config.PAGE_THEMES)}") from None
+
+
+def use_theme(name_or_dict):
+    """切换当前主题；传 dict 时登记为 "custom"（可先 dict(theme("white-green"), accent=...) 再改几项）。"""
+    if isinstance(name_or_dict, dict):
+        config.PAGE_THEMES["custom"] = name_or_dict
+        config.PAGE_THEME = "custom"
+    else:
+        theme(name_or_dict)
+        config.PAGE_THEME = name_or_dict
+    return theme()
+
+
+def _col(v, default):
+    v = default if v is None else v
+    return theme()[v] if v in _ROLES else v
+
+
+def _font(v, default):
+    v = default if v is None else v
+    return theme()[v] if v in _FONTS else v
+
+
+def _plain(s):
+    return s if isinstance(s, str) else "".join(p if isinstance(p, str) else p[0] for p in s)
+
+
+def _spans(s, fill):
+    """字符串原样转义；分段 [(文字, 颜色角色)] 输出带 fill 的 <tspan>（逐字 type 也保留颜色）。"""
+    if isinstance(s, str):
+        return esc(s)
+    out = []
+    for part in s:
+        txt, role = (part, None) if isinstance(part, str) else part
+        out.append(f'<tspan fill="{_col(role, fill)}">{esc(txt)}</tspan>' if role else esc(txt))
+    return "".join(out)
+
+
+def _tm(tm, dur):
+    """timings 的一项 → 时刻属性：(cue, offset) 或数字 delay。"""
+    if isinstance(tm, tuple):
+        cue, off = (tm + (None,))[:2]
+        return _t(cue, 0.0, dur, off)
+    return _t(None, float(tm), dur)
+
+
+def step_fps(fps=12):
+    """整场按 fps 定格推进（元素按字进来、停住的节奏）；放进片段任意位置一次即可。"""
+    return f'<g data-step-fps="{fps:g}"/>'
+
+
+def page_background(path, color=None, size=None):
+    """把主题底色写成一张整画布 PNG，供 config.BG_VIDEO 使用（render 铺满画布且不动）。"""
+    from PIL import Image
+    w, h = size or (config.WIDTH, config.HEIGHT)
+    c = _col(color, "page").lstrip("#")
+    p = pathlib.Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (w, h), tuple(int(c[i:i + 2], 16) for i in (0, 2, 4))).save(p)
+    return str(p)
+
+
+def _uid(prefix, *parts):
+    import hashlib
+    return prefix + hashlib.sha1(repr(parts).encode("utf-8")).hexdigest()[:8]
+
+
+def _shadow(idp, blur=26, dy=14, opacity=0.28, dx=0, color=None):
+    color = _col(color, "shadow")
+    return (f'<filter id="{idp}" x="-15%" y="-15%" width="130%" height="135%">'
+            f'<feDropShadow dx="{dx}" dy="{dy}" stdDeviation="{blur}" flood-color="{color}" '
+            f'flood-opacity="{opacity}"/></filter>')
+
+
+# ---- 文字 --------------------------------------------------------------------------
+def page_text(s, x, y, size, cue=None, delay=0.3, dur=0.33, anim="fade-up", fill=None,
+              font=None, weight=900, anchor="start", ls=0, shift=None, offset=None, index=None):
+    """页上的一行字（标题、正文、标签都用它）。默认粗体墨色；s 可分段上色。"""
+    fill = _col(fill, "ink"); font = _font(font, "heavy")
+    sh = f' data-shift="{shift}"' if shift is not None else ""
+    return (f'<text data-anim="{anim}"{sh} {_t(cue,delay,dur,offset,index)} x="{x}" y="{y}" '
+            f'font-family="{font}" font-size="{size}" font-weight="{weight}" fill="{fill}" '
+            f'text-anchor="{anchor}" letter-spacing="{ls}">{_spans(s, fill)}</text>')
+
+
+def page_title(title, kicker=None, sub=None, x=None, y=None, size=180, cue=None, kicker_cue=None,
+               sub_cue=None, delay=0.3, dur=0.33, offset=None):
+    """页眉：等宽小标（灰）→ 大标题（黑色粗字，可分段上色）→ 副标题（灰）。各自可绑词。"""
+    th = theme(); x = th["margin"] if x is None else x; y = th["top"] + size if y is None else y
+    out = []
+    if kicker:
+        out.append(page_text(kicker, x + 4, y - size - 50, 44, cue=kicker_cue or cue, delay=delay, dur=dur,
+                             fill="muted", font="mono", weight=700, ls=6, shift=20))
+    out.append(page_text(title, x, y, size, cue=cue, delay=delay, dur=dur, shift=30, offset=offset))
+    if sub:
+        out.append(page_text(sub, x + 4, y + int(size * 0.55), 60, cue=sub_cue or cue, delay=delay, dur=dur,
+                             fill="muted", font="sans", weight=400, shift=20))
+    return "".join(out)
+
+
+def tag(s, x, y, size=40, color=None, cue=None, delay=0.4, dur=1/12, filled=False, offset=None, index=None):
+    """等宽小标签（胶囊框，如 CONFIRMED）；(x, y) 是框左上角。filled=True 时实底白字。"""
+    color = _col(color, "accent"); mono = _font(None, "mono")
+    w = _text_w(s, size) * 1.05 + size * 1.6 + len(s) * size * 0.08; h = size * 1.9
+    bg = f'fill="{color}"' if filled else f'fill="none" stroke="{color}" stroke-width="{max(3, size // 12)}"'
+    txt = _col("page", None) if filled else color
+    return (f'<g transform="translate({x},{y})"><g data-anim="fade" {_t(cue,delay,dur,offset,index)}>'
+            f'<rect x="0" y="0" width="{w:.0f}" height="{h:.0f}" rx="{h/2:.0f}" {bg}/>'
+            f'<text x="{w/2:.0f}" y="{h/2 + size*0.36:.0f}" text-anchor="middle" font-family="{mono}" '
+            f'font-size="{size}" font-weight="700" letter-spacing="{size*0.08:.1f}" fill="{txt}">{esc(s)}</text>'
+            f'</g></g>')
+
+
+def old_text(s, x, y, size, cue=None, delay=0.3, strike_cue=None, strike_delay=None, strike_offset=None,
+             fill=None, font=None, weight=700, offset=None):
+    """旧说法：灰字；给 strike_cue/strike_delay 时到点划上删除线，否则一出现就带删除线。"""
+    fill = _col(fill, "muted"); w = _text_w(_plain(s), size)
+    line_t = (_t(strike_cue, strike_delay or 0.0, 1/6, strike_offset) if (strike_cue or strike_delay is not None)
+              else _t(cue, delay, 0.01, offset))
+    return (page_text(s, x, y, size, cue=cue, delay=delay, fill=fill, font=font or "heavy", weight=weight,
+                      anim="fade", dur=1/12, offset=offset)
+            + f'<line data-anim="draw" {line_t} x1="{x - size*0.1:.0f}" y1="{y - size*0.32:.0f}" '
+              f'x2="{x + w + size*0.1:.0f}" y2="{y - size*0.36:.0f}" stroke="{fill}" '
+              f'stroke-width="{max(4, size // 14)}" stroke-linecap="round"/>')
+
+
+def hand_line(s, x, y, size=88, cue=None, delay=0.4, dur=0.25, color=None, font=None,
+              rotate=0, weight=400, offset=None, index=None):
+    """一行从左往右写出（wipe），写完不动；主题 hand 字体（纸页红是楷体，白底绿是黑体）。"""
+    color = _col(color, "ink"); font = _font(font, "hand")
+    rot = f" rotate({rotate})" if rotate else ""
+    return (f'<g transform="translate({x},{y}){rot}"><text data-anim="wipe" data-dir="left" '
+            f'{_t(cue,delay,dur,offset,index)} x="0" y="0" font-family="{font}" font-size="{size}" '
+            f'font-weight="{weight}" fill="{color}">{_spans(s, color)}</text></g>')
+
+
+# ---- 编号、清单、数字、引语 -------------------------------------------------------------
+def number_row(labels, x, y, gap=220, size=88, cue=None, delay=0.4, step=1/12,
+               fill=None, font=None, offset=0.0, index=None):
+    """一行空编号（01 02 03 …），每 step 秒出现一个。"""
+    return "".join(page_text(s, x + i * gap, y, size, cue=cue, delay=delay + i * step, dur=step,
+                             anim="fade", fill=fill or "faint", font=font or "mono", weight=400,
+                             offset=(offset + i * step) if cue else None, index=index)
+                   for i, s in enumerate(labels))
+
+
+def mark_label(s, x, y, size=88, cue=None, delay=0.4, color=None, bar=None, font=None, offset=None, index=None):
+    """点亮一个编号：同位置叠一层粗体并加一条下划线，一拍出现后不动。"""
+    color = _col(color, "ink"); bar = _col(bar, "accent"); font = _font(font, "mono")
+    w = int(_text_w(s, size) * 1.05)
+    return (f'<g data-anim="fade" {_t(cue,delay,0.05,offset,index)}>'
+            f'<text x="{x}" y="{y}" font-family="{font}" font-size="{size}" font-weight="900" fill="{color}">{esc(s)}</text>'
+            f'<rect x="{x}" y="{y + int(size*0.22)}" width="{w}" height="{max(4, size//11)}" fill="{bar}"/></g>')
+
+
+def nav_list(items, x=None, y=640, gap=130, size=60, active=None, cue=None, delay=0.4, step=1/12,
+             active_cue=None, active_delay=None, active_offset=None, offset=0.0, numbered=True):
+    """左侧目录：各项按 step 依次出现（浅灰），active 那项到 active_cue 时变黑、左侧出一条竖线。"""
+    th = theme(); x = th["margin"] if x is None else x
+    out = []
+    for i, s in enumerate(items):
+        yy = y + i * gap
+        t_kw = dict(cue=cue, delay=delay + i * step, dur=step, offset=(offset + i * step) if cue else None)
+        if numbered:
+            out.append(page_text(f"{i + 1:02d}", x, yy, size * 0.7, anim="fade", fill="faint", font="mono",
+                                 weight=700, **t_kw))
+        out.append(page_text(s, x + (size * 1.6 if numbered else 0), yy, size, anim="fade", fill="faint",
+                             font="sans", weight=500, **t_kw))
+    if active is not None:
+        yy = y + active * gap; at = _t(active_cue, active_delay if active_delay is not None else delay, 0.05,
+                                       active_offset)
+        num = (f'<text x="{x}" y="{yy}" font-family="{th["mono"]}" font-size="{size*0.7:.0f}" font-weight="700" '
+               f'fill="{th["ink"]}">{active + 1:02d}</text>' if numbered else "")
+        out.append(f'<g data-anim="fade" {at}>'
+                   f'<rect x="{x - 50}" y="{yy - size*0.95:.0f}" width="{max(5, size//10)}" height="{size*1.25:.0f}" fill="{th["ink"]}"/>'
+                   f'{num}<text x="{x + (size * 1.6 if numbered else 0):.0f}" y="{yy}" font-family="{th["sans"]}" '
+                   f'font-size="{size}" font-weight="700" fill="{th["ink"]}">{_spans(items[active], th["ink"])}</text></g>')
+    return "".join(out)
+
+
+def bullets(items, x=None, y=900, size=60, gap=None, dash=True, fill=None):
+    """短横线清单。items 每项 (文字或分段, timing)；timing 同 timings：(cue, offset) 或 delay。"""
+    th = theme(); x = th["margin"] if x is None else x; gap = gap or int(size * 1.75)
+    out = []
+    for i, (s, tm) in enumerate(items):
+        yy = y + i * gap
+        body = (f'<text x="0" y="0" font-family="{th["sans"]}" font-size="{size}" fill="{th["muted"]}">–</text>'
+                if dash else "")
+        out.append(f'<g transform="translate({x},{yy})"><g data-anim="fade" {_tm(tm, 1/12)}>{body}'
+                   f'<text x="{size*1.0 if dash else 0:.0f}" y="0" font-family="{th["sans"]}" font-size="{size}" '
+                   f'font-weight="500" fill="{_col(fill, "ink")}">{_spans(s, _col(fill, "ink"))}</text></g></g>')
+    return "".join(out)
+
+
+def figure(value, x, y, size=220, label=None, unit=None, cue=None, delay=0.4, fill=None, offset=None):
+    """一个大数字：上方等宽小标签，数字黑色粗体（可 fill="accent"），后面跟灰色单位。一拍出现。"""
+    th = theme(); fill = _col(fill, "ink")
+    lab = (f'<text x="{x}" y="{y - size*0.95:.0f}" font-family="{th["mono"]}" font-size="{max(36, size//5)}" '
+           f'font-weight="700" letter-spacing="4" fill="{th["muted"]}">{esc(label)}</text>' if label else "")
+    un = (f'<text x="{x + _text_w(str(value), size) + size*0.12:.0f}" y="{y}" font-family="{th["sans"]}" '
+          f'font-size="{size*0.36:.0f}" font-weight="700" fill="{th["muted"]}">{esc(unit)}</text>' if unit else "")
+    return (f'<g data-anim="fade" {_t(cue,delay,1/12,offset)}>{lab}'
+            f'<text x="{x}" y="{y}" font-family="{th["heavy"]}" font-size="{size}" font-weight="900" '
+            f'fill="{fill}">{esc(value)}</text>{un}</g>')
+
+
+def quote_block(lines, x=None, y=900, size=76, source=None, cue=None, delay=0.4, step=1/12, offset=0.0):
+    """引语：绿色引号 + 各行依次出现 + 等宽灰色出处。"""
+    th = theme(); x = th["margin"] if x is None else x
+    out = [page_text("“", x - size * 0.1, y + size * 0.15, size * 2.2, cue=cue, delay=delay, dur=step, anim="fade",
+                     fill="accent", offset=offset if cue else None)]
+    for i, ln in enumerate(lines):
+        out.append(page_text(ln, x + size * 1.3, y + i * size * 1.5, size, cue=cue, delay=delay + (i + 1) * step,
+                             dur=step, anim="fade", font="sans", weight=700,
+                             offset=(offset + (i + 1) * step) if cue else None))
+    if source:
+        out.append(page_text(source, x + size * 1.3, y + len(lines) * size * 1.5 + size * 0.2, size * 0.55,
+                             cue=cue, delay=delay + (len(lines) + 1) * step, dur=step, anim="fade", fill="muted",
+                             font="mono", weight=700, offset=(offset + (len(lines) + 1) * step) if cue else None))
+    return "".join(out)
+
+
+def meter(n, x, y, timings=(), cell=40, gap=14, fill=None, empty=None, cue=None, delay=0.3, offset=None):
+    """方块计量（■■■□）：n 个空格先在 cue 出现；timings 每项点亮一格，停住不动。"""
+    fill = _col(fill, "ink"); empty = _col(empty, "rule")
+    out = [f'<g data-anim="fade" {_t(cue,delay,1/12,offset)}>']
+    out += [f'<rect x="{x + i*(cell+gap)}" y="{y - cell}" width="{cell}" height="{cell}" fill="{empty}"/>' for i in range(n)]
+    out.append('</g>')
+    for i, tm in enumerate(list(timings)[:n]):
+        out.append(f'<rect data-anim="fade" {_tm(tm, 1/24)} x="{x + i*(cell+gap)}" y="{y - cell}" '
+                   f'width="{cell}" height="{cell}" fill="{fill}"/>')
+    return "".join(out)
+
+
+# ---- 时间轴与条形时间表 -------------------------------------------------------------------
+def time_axis(x, y, w, ticks=(), cue=None, delay=0.3, size=40, color=None, offset=None):
+    """细线时间轴：一条墨线 + 刻度 + 等宽灰色刻度字，一拍出现。ticks 每项 (位置0—1, 文字)。"""
+    th = theme(); color = _col(color, "ink"); lw = th["line_width"]
+    out = [f'<g data-anim="fade" {_t(cue,delay,1/12,offset)}>'
+           f'<line x1="{x}" y1="{y}" x2="{x + w}" y2="{y}" stroke="{color}" stroke-width="{lw}"/>']
+    for frac, label in ticks:
+        px = x + w * frac
+        out.append(f'<line x1="{px:.0f}" y1="{y}" x2="{px:.0f}" y2="{y + size*0.4:.0f}" stroke="{color}" stroke-width="{lw}"/>')
+        if label:
+            out.append(f'<text x="{px:.0f}" y="{y + size*1.6:.0f}" text-anchor="middle" font-family="{th["mono"]}" '
+                       f'font-size="{size}" fill="{th["muted"]}">{esc(label)}</text>')
+    out.append('</g>')
+    return "".join(out)
+
+
+def time_block(x, w, axis_y, h, style="ink", label=None, sub=None, cue=None, delay=0.4, dur=1/6, offset=None,
+               index=None, size=44):
+    """坐在时间轴上的一段（x 起、宽 w、高 h），从轴向上长出后停住。
+    style：ink 实黑 / accent 实绿 / block 浅灰 / hatch 斜线；label 粗体、sub 等宽灰字标在上方。"""
+    th = theme(); top = axis_y - h; lw = th["line_width"]; defs = ""
+    if style == "hatch":
+        pid = _uid("hatch", x, w, axis_y, h)
+        defs = (f'<defs><pattern id="{pid}" width="22" height="22" patternUnits="userSpaceOnUse" '
+                f'patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="22" stroke="{th["ink"]}" '
+                f'stroke-width="{lw}"/></pattern></defs>')
+        paint = f'fill="url(#{pid})" stroke="{th["ink"]}" stroke-width="{lw}"'
+    elif style == "block":
+        paint = f'fill="{th["block"]}" stroke="{th["faint"]}" stroke-width="{lw/2:g}"'
+    else:
+        paint = f'fill="{_col(style, "ink")}"'
+    at = _t(cue, delay, dur, offset, index)
+    out = [defs, f'<rect data-anim="wipe" data-dir="down" {at} x="{x}" y="{top}" width="{w}" height="{h}" {paint}/>']
+    if label or sub:
+        lab = (f'<text x="0" y="0" font-family="{th["sans"]}" font-size="{size}" font-weight="700" '
+               f'fill="{th["ink"]}">{_spans(label, th["ink"])}</text>' if label else "")
+        sx = _text_w(_plain(label), size) + size * 0.5 if label else 0
+        sb = (f'<text x="{sx:.0f}" y="0" font-family="{th["mono"]}" font-size="{size*0.9:.0f}" '
+              f'fill="{th["muted"]}">{esc(sub)}</text>' if sub else "")
+        out.append(f'<g transform="translate({x},{top - size*0.6:.0f})"><g data-anim="fade" '
+                   f'{_t(cue, delay + dur, 1/12, (offset or 0) + dur if cue else None, index)}>{lab}{sb}</g></g>')
+    return "".join(out)
+
+
+def progress(n, current, frac=1.0, x=None, w=None, y=None, h=4):
+    """底部分段进度条：n 段浅灰细线，第 current 段（从 0 数）黑色、前 frac 部分绿色。静态，整场不动。"""
+    th = theme(); x = th["margin"] if x is None else x
+    w = (config.WIDTH - 2 * th["margin"]) if w is None else w
+    y = th["progress"]["y"] if y is None else y; gap = th["progress"]["gap"]
+    seg = (w - gap * (n - 1)) / n
+    out = ['<g>']
+    for i in range(n):
+        sx = x + i * (seg + gap)
+        color = th["ink"] if i == current else th["rule"]
+        out.append(f'<rect x="{sx:.1f}" y="{y}" width="{seg:.1f}" height="{h}" fill="{color}"/>')
+        if i == current and frac > 0:
+            out.append(f'<rect x="{sx:.1f}" y="{y}" width="{seg*min(1.0, frac):.1f}" height="{h}" fill="{th["accent"]}"/>')
+    out.append('</g>')
+    return "".join(out)
+
+
+# ---- 卡片、照片、抠图、气泡、圈 ------------------------------------------------------------
+def card(x, y, w, h, inner="", cue=None, delay=0.4, dur=0.25, anim="fade-up", shift=30, offset=None, index=None):
+    """白色圆角卡片（主题的填充、细边、圆角、软投影）；inner 是卡片内坐标的 SVG，随卡片一起进来。"""
+    th = theme(); c = th["card"]; idp = _uid("crd", x, y, w, h)
+    sb, sdy, sop = c["shadow"]
+    line = f' stroke="{c["line"]}" stroke-width="{th["line_width"]/2:g}"' if c.get("line") else ""
+    return (f'<defs>{_shadow(idp, blur=sb, dy=sdy, opacity=sop)}</defs>'
+            f'<g transform="translate({x},{y})"><g data-anim="{anim}" data-shift="{shift}" {_t(cue,delay,dur,offset,index)}>'
+            f'<rect x="0" y="0" width="{w}" height="{h}" rx="{c["radius"]}" fill="{c["fill"]}"{line} filter="url(#{idp})"/>'
+            f'{inner}</g></g>')
+
+
+def photo_card(name, cx, cy, w, h=None, rotate=None, cue=None, delay=0.4, dur=0.33, anim=None, shift=None,
+               spin=2.5, tape=None, align="xMidYMid", offset=None, index=None):
+    """写实照片卡：主题决定白边、圆角、细边、投影、倾斜和胶带；(cx, cy) 是卡片中心，w 是照片宽。
+    h 给定时按 w×h 裁切（align 选保留哪边，如 "xMinYMid"）。默认动作：倾斜主题“落到纸上”(drop)，
+    不倾斜主题短距上移淡入(fade-up)；进来就停住。"""
+    th = theme(); c = th["card"]
+    iw, ih = img_dims(name); h = w * ih / iw if h is None else h
+    pad, radius = c["pad"], c["radius"]
+    rotate = c["tilt"] if rotate is None else rotate
+    tape = c["tape"] if tape is None else tape
+    anim = anim or ("drop" if rotate else "fade-up")
+    shift = (110 if anim == "drop" else 40) if shift is None else shift
+    cw, ch = w + 2 * pad, h + 2 * pad
+    idp = _uid("card", name, cx, cy, w, h)
+    sb, sdy, sop = c["shadow"]
+    clip = (f'<clipPath id="{idp}c"><rect x="{-w/2:.1f}" y="{-h/2:.1f}" width="{w:.1f}" height="{h:.1f}" '
+            f'rx="{max(0, radius - pad)}"/></clipPath>')
+    tw, tth = min(360, cw * 0.28), 92
+    tape_svg = (f'<g transform="translate(0,{-ch/2:.1f}) rotate(4)">'
+                f'<rect x="{-tw/2:.1f}" y="{-tth/2:.1f}" width="{tw:.1f}" height="{tth}" fill="#ECE0C4" fill-opacity="0.74"/>'
+                f'<rect x="{-tw/2:.1f}" y="{-tth/2:.1f}" width="{tw:.1f}" height="14" fill="#FFFFFF" fill-opacity="0.22"/></g>'
+                if tape else "")
+    line = (f'<rect x="{-cw/2:.1f}" y="{-ch/2:.1f}" width="{cw:.1f}" height="{ch:.1f}" rx="{radius}" fill="none" '
+            f'stroke="{c["line"]}" stroke-width="{th["line_width"]/2:g}"/>' if c.get("line") else
+            f'<rect x="{-w/2:.1f}" y="{-h/2:.1f}" width="{w:.1f}" height="{h:.1f}" fill="none" stroke="#000" '
+            f'stroke-opacity="0.08" stroke-width="2"/>')
+    extra = f' data-spin="{spin}"' if anim == "drop" else ""
+    return (f'<defs>{_shadow(idp, blur=sb, dy=sdy, opacity=sop)}{clip}</defs>'
+            f'<g transform="translate({cx},{cy}) rotate({rotate})">'
+            f'<g data-anim="{anim}" data-shift="{shift}"{extra} {_t(cue,delay,dur,offset,index)}>'
+            f'<rect x="{-cw/2:.1f}" y="{-ch/2:.1f}" width="{cw:.1f}" height="{ch:.1f}" rx="{radius}" fill="{c["fill"]}" filter="url(#{idp})"/>'
+            f'<image href="{FU(name)}" xlink:href="{FU(name)}" x="{-w/2:.1f}" y="{-h/2:.1f}" width="{w:.1f}" height="{h:.1f}" '
+            f'preserveAspectRatio="{align} slice" clip-path="url(#{idp}c)"/>'
+            f'{line}{tape_svg}</g></g>')
+
+
+def cutout(name, x, y, h, cue=None, delay=0.4, dur=0.33, shift=260, shadow=True, offset=None, index=None):
+    """抠好的主体（透明底 PNG）压在卡片前面：从下方冒出来后停住。(x, y) 是图片左上角。"""
+    iw, ih = img_dims(name); w = h * iw / ih
+    idp = _uid("cut", name, x, y, h)
+    filt = f' filter="url(#{idp})"' if shadow else ""
+    defs = f'<defs>{_shadow(idp, blur=22, dy=16, opacity=0.22, dx=-10)}</defs>' if shadow else ""
+    return (f'{defs}<g transform="translate({x},{y})"><g data-anim="fade-up" data-shift="{shift}" '
+            f'{_t(cue,delay,dur,offset,index)}><image href="{FU(name)}" xlink:href="{FU(name)}" '
+            f'width="{w:.1f}" height="{h:.1f}" preserveAspectRatio="xMidYMid meet"{filt}/></g></g>')
+
+
+def image_point(name, x, y, h, fx, fy):
+    """图片内相对位置 (fx, fy) 在画布上的坐标，例如抠图的嘴，用来对准气泡尾巴。"""
+    iw, ih = img_dims(name); w = h * iw / ih
+    return x + fx * w, y + fy * h
+
+
+def bubble_bounds(s, tip_x, tip_y, size=80, side="left", tail=130, lift=70, pad=68):
+    """speech_bubble 的外框 (x, y, w, h)，给圈、标签等后续零件定位。"""
+    bw = len(s) * size * 0.6 + 2 * pad; bh = size + pad * 1.6
+    bx = tip_x - tail - bw if side == "left" else tip_x + tail
+    return bx, tip_y - lift - bh / 2, bw, bh
+
+
+def speech_bubble(s, tip_x, tip_y, size=80, side="left", tail=130, lift=70, pad=68,
+                  cue=None, delay=0.4, dur=1/6, type_cue=None, type_delay=None, type_dur=0.25,
+                  offset=None, type_offset=None, font=None):
+    """对话气泡：尾巴尖落在 (tip_x, tip_y)（对准说话者的嘴），框先弹出，再打字机打出文字。
+    side="left" 时气泡在嘴的左边。填充、描边、圆角取主题；默认等宽字，宽度按等宽字估算。"""
+    th = theme(); b = th["bubble"]; font = _font(font, "mono")
+    bx, by, bw, bh = bubble_bounds(s, tip_x, tip_y, size, side, tail, lift, pad)
+    r, ty = b["radius"], by + bh * 0.62
+    top = f"M{bx+r:.1f},{by:.1f} L{bx+bw-r:.1f},{by:.1f} Q{bx+bw:.1f},{by:.1f} {bx+bw:.1f},{by+r:.1f} "
+    bottom_left = (f"L{bx+r:.1f},{by+bh:.1f} Q{bx:.1f},{by+bh:.1f} {bx:.1f},{by+bh-r:.1f} ")
+    corner_br = f"L{bx+bw:.1f},{by+bh-r:.1f} Q{bx+bw:.1f},{by+bh:.1f} {bx+bw-r:.1f},{by+bh:.1f} "
+    close = f"L{bx:.1f},{by+r:.1f} Q{bx:.1f},{by:.1f} {bx+r:.1f},{by:.1f} Z"
+    if side == "left":
+        e = bx + bw
+        d = (top + f"L{e:.1f},{ty-34:.1f} L{tip_x:.1f},{tip_y:.1f} L{e:.1f},{ty+8:.1f} "
+             + corner_br + bottom_left + close)
+    else:
+        d = (top + corner_br + bottom_left
+             + f"L{bx:.1f},{ty+8:.1f} L{tip_x:.1f},{tip_y:.1f} L{bx:.1f},{ty-34:.1f} " + close)
+    idp = _uid("bub", s, tip_x, tip_y)
+    if type_cue is None and type_delay is None:
+        type_cue, type_delay, type_offset = cue, delay + dur, (offset or 0) + dur
+    return (f'<defs>{_shadow(idp, blur=12, dy=8, opacity=0.14)}</defs>'
+            f'<g data-anim="pop" {_t(cue,delay,dur,offset)}>'
+            f'<path d="{d}" fill="{b["fill"]}" stroke="{b["line"]}" stroke-width="{b["line_width"]}" '
+            f'stroke-linejoin="round" filter="url(#{idp})"/>'
+            f'<text data-anim="type" {_t(type_cue,type_delay or 0.0,type_dur,type_offset)} x="{bx+pad:.1f}" '
+            f'y="{by+bh/2+size*0.34:.1f}" font-family="{font}" font-size="{size}" font-weight="700" '
+            f'fill="{th["ink"]}">{esc(s)}</text></g>')
+
+
+def pen_strokes(paths, x, y, size=300, timings=(), dur=1/12, color=None, width=18, rotate=0):
+    """一笔笔写（主题笔色）。paths 是 100×100 方格内的路径；timings 每笔一项；项数少于 paths 时只写前几笔。"""
+    color = _col(color, "pen"); k = size / 100.0
+    rot = f" rotate({rotate})" if rotate else ""
+    out = [f'<g transform="translate({x},{y}){rot} scale({k:.4f})">']
+    for d, tm in zip(paths, timings):
+        out.append(f'<path data-anim="draw" {_tm(tm, dur)} d="{d}" fill="none" stroke="{color}" '
+                   f'stroke-width="{width / k:.2f}" stroke-linecap="round" stroke-linejoin="round"/>')
+    out.append('</g>')
+    return "".join(out)
+
+
+def tally(n, x, y, size=300, timings=(), **kw):
+    """“正”字计数：写前 n 笔（n ≤ 5），每笔各自的时刻见 pen_strokes。"""
+    return pen_strokes(ZHENG_STROKES[:n], x, y, size=size, timings=timings, **kw)
+
+
+def pen_circle(cx, cy, rx, ry, cue=None, delay=0.4, dur=0.25, color=None, width=14,
+               start=200, sweep=385, spiral=0.05, rotate=-3, square=2.0, offset=None, index=None):
+    """手画圈（主题笔色）：一笔画的圈，收笔略越过起点，画完不动。
+    square=2 是椭圆；圈长条文字（气泡、一行字）用 3—4，更贴近矩形、角上不切字。
+    干净版式要规整的框时用 hl_box(..., color=theme()["accent"])。"""
+    color = _col(color, "pen")
+    a0, n, e = math.radians(start), 120, 2.0 / square
+    pts = []
+    for i in range(n + 1):
+        a = a0 + math.radians(sweep) * i / n; g = 1 + spiral * i / n
+        c, s = math.cos(a), math.sin(a)
+        x = math.copysign(abs(c) ** e, c) * rx * g; y = math.copysign(abs(s) ** e, s) * ry * g
+        pts.append(f"{x:.1f},{y:.1f}")
+    return (f'<g transform="translate({cx:.1f},{cy:.1f}) rotate({rotate})">'
+            f'<path data-anim="draw" {_t(cue,delay,dur,offset,index)} d="M{" L".join(pts)}" fill="none" '
+            f'stroke="{color}" stroke-width="{width}" stroke-linecap="round" stroke-linejoin="round"/></g>')

@@ -38,6 +38,7 @@ FPS = 60
 # --- background -------------------------------------------------------------
 # Universal seamless-loop clip (regenerate with background/render_background.py).
 # The renderer loops it to cover any duration.
+# A still PNG/JPEG (e.g. a paper page) also works: it is cover-fit and never moves.
 BG_VIDEO = _p("background", "background_4k.mp4")
 
 # --- encode (NVIDIA NVENC AV1) ----------------------------------------------
@@ -81,6 +82,50 @@ SCREENSHOT_FAST = True  # CDP optimizeForSpeed PNG (faster encode + decode)
 INK = "#0C2B1B"  # 深黛绿 primary text
 ACCENT = "#1F7A4D"  # 流光浅绿 accent for lines / arrows
 FADE_SECONDS = 0.5  # per-scene fade in / out
+
+# --- page themes (图文页) -----------------------------------------------------
+# The ONE place for the page style: colours, fonts, spacing and burned-subtitle
+# style. v2lib page components and subtitles.karaoke_ass() read the active theme
+# at call time, so switching PAGE_THEME (or registering a dict here) restyles a
+# whole video without touching any component. Sizes are 4K canvas px; subtitle
+# sizes are 1080p px (the playable copy). See docs/AUTHORING.md “图文页”.
+PAGE_THEMES = {
+    # 白底绿：米白页、黑色粗字、重点绿色、旧说法灰、细线与等宽小标签、白色圆角卡片
+    "white-green": {
+        "page": "#F6F6F3", "ink": "#0C0C0C", "accent": "#10A27E", "muted": "#6B6B66",
+        "faint": "#A4A49F", "rule": "#E2E2DE", "block": "#ECEAE6", "pen": "#10A27E", "shadow": "#1A1A17",
+        "heavy": "'HarmonyOS Sans SC Black','HarmonyOS Sans SC','Noto Sans SC Black','Noto Sans SC','Microsoft YaHei',sans-serif",
+        "sans": "'HarmonyOS Sans SC','Noto Sans SC','Microsoft YaHei',sans-serif",
+        "mono": "'Cascadia Mono','Consolas','HarmonyOS Sans SC',monospace",
+        "hand": "'HarmonyOS Sans SC','Noto Sans SC','Microsoft YaHei',sans-serif",
+        "margin": 240, "top": 300, "line_width": 4,
+        "card": {"fill": "#FFFFFF", "line": "#E2E2DE", "radius": 28, "pad": 0, "tilt": 0,
+                 "tape": False, "shadow": (30, 10, 0.07)},
+        "bubble": {"fill": "#FFFFFF", "line": "#0C0C0C", "line_width": 4, "radius": 28},
+        "subtitle": {"font": "HarmonyOS Sans SC", "size": 54, "bold": True, "color": "#0C0C0C",
+                     "active": "#10A27E", "outline_color": "#F6F6F3", "outline": 4, "shadow": 0,
+                     "margin_v": 64},
+        "progress": {"y": 2044, "gap": 20},
+    },
+    # 纸页红：米色纸、粗宋墨黑、红笔批注、白边胶带照片卡（纸页本身用一张图作背景）
+    "paper-red": {
+        "page": "#EFE6D2", "ink": "#1D1A17", "accent": "#C42A1F", "muted": "#8C857B",
+        "faint": "#B4AC9F", "rule": "#CFC5B3", "block": "#E4D9C3", "pen": "#C42A1F", "shadow": "#2A1C0F",
+        "heavy": "'Source Han Serif SC Heavy','Source Han Serif SC','Noto Serif SC','STZhongsong',serif",
+        "sans": "'Microsoft YaHei','PingFang SC',-apple-system,sans-serif",
+        "mono": "'Courier New',Courier,monospace",
+        "hand": "'KaiTi','STKaiti',serif",
+        "margin": 260, "top": 300, "line_width": 6,
+        "card": {"fill": "#FFFDF8", "line": None, "radius": 0, "pad": 40, "tilt": -3,
+                 "tape": True, "shadow": (26, 14, 0.28)},
+        "bubble": {"fill": "#FFFDF8", "line": "#1D1A17", "line_width": 6, "radius": 40},
+        "subtitle": {"font": "Microsoft YaHei", "size": 64, "bold": True, "color": "#F7FDFF",
+                     "active": "#FFE19A", "outline_color": "#251F1B", "outline": 4.5, "shadow": 1.2,
+                     "margin_v": 52},
+        "progress": {"y": 2050, "gap": 20},
+    },
+}
+PAGE_THEME = os.environ.get("VIDEO_PAGE_THEME", "white-green")
 
 # --- scene transitions ------------------------------------------------------
 # How one scene leaves and the next enters (motion + cross-dissolve through bg).

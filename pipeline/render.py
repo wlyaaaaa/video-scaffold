@@ -160,7 +160,17 @@ def _chunk_identity(identity, timeline, index, chunk_frames, total_frames, bg_du
     return record
 
 
+STILL_BACKGROUND_SUFFIXES = (".png", ".jpg", ".jpeg")
+
+
+def _bg_is_still():
+    """A still image (e.g. a paper page) may stand in for the looping clip."""
+    return str(config.BG_VIDEO).lower().endswith(STILL_BACKGROUND_SUFFIXES)
+
+
 def _bg_duration():
+    if _bg_is_still():
+        return 1.0  # every offset shows the same page
     out = subprocess.run(
         [
             "ffprobe",
@@ -261,7 +271,16 @@ def _envelope_at(scene, t):
 
 
 def _chunk_cmd(bg_offset, chunk_dur, chunk_out):
-    vfilter = f"[0:v]trim=start={bg_offset:.3f},setpts=PTS-STARTPTS[bg]; [bg][1:v]overlay=0:0:shortest=1"
+    still = _bg_is_still()
+    if still:
+        # cover-fit the still page to the canvas; it never moves, so no offset
+        bg = (f"[0:v]scale={config.WIDTH}:{config.HEIGHT}:force_original_aspect_ratio=increase,"
+              f"crop={config.WIDTH}:{config.HEIGHT},setsar=1[bg]")
+        background_input = ["-loop", "1", "-framerate", str(config.FPS), "-i", config.BG_VIDEO]
+    else:
+        bg = f"[0:v]trim=start={bg_offset:.3f},setpts=PTS-STARTPTS[bg]"
+        background_input = ["-stream_loop", "-1", "-i", config.BG_VIDEO]
+    vfilter = f"{bg}; [bg][1:v]overlay=0:0:shortest=1"
     if config.CINEMATIC:
         if config.VIGNETTE_ANGLE > 0:
             vfilter += f",vignette=angle={config.VIGNETTE_ANGLE}"
@@ -273,10 +292,7 @@ def _chunk_cmd(bg_offset, chunk_dur, chunk_out):
         "-hide_banner",
         "-loglevel",
         "error",
-        "-stream_loop",
-        "-1",
-        "-i",
-        config.BG_VIDEO,
+        *background_input,
         "-f",
         "image2pipe",
         "-vcodec",

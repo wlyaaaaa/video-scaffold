@@ -21,6 +21,11 @@
        data-anim="count"     number tweens up         (a <text>; data-to / data-from
                              / data-decimals / data-prefix / data-suffix)
        data-anim="float"     无重力悬浮 (continuous)   (game art / panels)
+       data-anim="drop"      照片卡落到纸面：下落+微转后停住 (data-shift / data-spin)
+       data-shift="120"      fade-up / fade-left / fade-right / drop 的位移像素
+
+     Held-frame cadence (optional): put <g data-step-fps="12"/> anywhere in the
+     fragment and every animation advances on a 12fps grid (定格节奏).
 
      Timing attributes (seconds, optional):
        data-delay="0.5"   when it starts
@@ -131,6 +136,13 @@
     const delay = parseFloat(el.getAttribute("data-delay") || "0");
     const dur = parseFloat(el.getAttribute("data-dur") || "1");
     const rec = { el, kind, delay, dur };
+    // optional travel distance (px) for fade-up / fade-left / fade-right / drop
+    const shift = parseFloat(el.getAttribute("data-shift"));
+    rec.shift = Number.isFinite(shift) ? shift : null;
+    if (kind === "drop") {               // a card dropped onto the page: falls, turns slightly, lands
+      const spin = parseFloat(el.getAttribute("data-spin"));
+      rec.spin = Number.isFinite(spin) ? spin : 2;
+    }
 
     if (kind === "draw") {
       let len = 0;
@@ -159,12 +171,18 @@
 
     if (kind === "type") {
       // split into per-glyph <tspan> for 逐字 reveal without reflow
-      const txt = el.textContent;
+      // keep a coloured <tspan fill> run's colour (图文页“重点词绿色”) on each glyph
+      const parts = [];
+      for (const node of [...el.childNodes]) {
+        const fill = node.nodeType === 1 ? node.getAttribute("fill") : null;
+        for (const ch of node.textContent) parts.push([ch, fill]);
+      }
       el.textContent = "";
       rec.glyphs = [];
-      for (const ch of txt) {
+      for (const [ch, fill] of parts) {
         const ts = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
         ts.textContent = ch;
+        if (fill) ts.setAttribute("fill", fill);
         ts.style.opacity = 0;
         el.appendChild(ts);
         rec.glyphs.push(ts);
@@ -266,9 +284,14 @@
 
     switch (kind) {
       case "fade":     el.style.opacity = p; break;
-      case "fade-up":  el.style.opacity = p; el.style.transform = `translateY(${(1 - p) * 40}px)`; break;
-      case "fade-left":  el.style.opacity = p; el.style.transform = `translateX(${(1 - p) * -60}px)`; break;
-      case "fade-right": el.style.opacity = p; el.style.transform = `translateX(${(1 - p) * 60}px)`; break;
+      case "fade-up":  el.style.opacity = p; el.style.transform = `translateY(${(1 - p) * (rec.shift ?? 40)}px)`; break;
+      case "fade-left":  el.style.opacity = p; el.style.transform = `translateX(${(1 - p) * -(rec.shift ?? 60)}px)`; break;
+      case "fade-right": el.style.opacity = p; el.style.transform = `translateX(${(1 - p) * (rec.shift ?? 60)}px)`; break;
+      case "drop": {
+        el.style.opacity = clamp01(p * 1.6);
+        el.style.transform = `translateY(${-(1 - p) * (rec.shift ?? 70)}px) rotate(${(1 - p) * rec.spin}deg)`;
+        break;
+      }
       case "zoom":     el.style.opacity = p; el.style.transform = `scale(${0.92 + 0.08 * p})`; break;
       case "kicker-zoom": {
         let opacity = 1;
@@ -434,8 +457,15 @@
 
   document.querySelectorAll("[data-anim]").forEach(measure);
 
+  // Optional held-frame cadence: a fragment containing <g data-step-fps="12"/>
+  // advances its animation on a 12fps grid (each pose holds for several 60fps
+  // frames), like stop-motion print pages. Default is smooth 60fps.
+  const stepNode = document.querySelector("[data-step-fps]");
+  const stepFps = stepNode ? parseFloat(stepNode.getAttribute("data-step-fps")) : 0;
+
   // The renderer calls this for every frame; t is scene-local seconds.
   window.seekTime = function (t) {
+    if (stepFps > 0 && Number.isFinite(stepFps)) t = Math.floor(t * stepFps + 1e-6) / stepFps;
     for (const rec of nodes) apply(rec, t);
   };
 

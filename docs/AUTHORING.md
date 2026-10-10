@@ -57,6 +57,38 @@
 
 网页作品用 `webfilm stills` 看指定时刻、用 `webfilm render --start/--end` 看局部动作；用法见 `webfilm/README.md`。有交互时带同一份动作脚本，预览与整片按同一时钟执行。`webfilm/examples/story-flow` 是原创方法示例与验收样片，不是所有作品应遵守的样式，也不自动发给模型比赛参赛者。
 
+## 图文页：一页上元素按念到的词进来
+
+适合讲清“几件事、几条、几种”的段落：画面是一张页（米白底、黑色粗字、重点词绿色、旧说法灰或删除线、细线时间轴、等宽小标签、白色圆角卡片、底部分段进度），可配写实照片或抠图角色，也可以没有角色。走分镜配音支路，零件在 `v2lib` 后半部，样式只取 `config.PAGE_THEMES` 一处。
+
+**规矩。** 每个元素绑一个念到的词（`cue`，同词再次出现用 `index`，同词里错开用 `offset`），到点一拍进来，进来就停住；不推拉、不漂浮、不叠化，整场只在念到新词时变化。片段里放一次 `L.step_fps(12)`，所有进场按 12fps 定格推进。页与页之间硬切（`TRANSITION_SECONDS = 0`），图文页不加暗角颗粒（`CINEMATIC = False`）。`lint` 在图文页里看到 float、drift、push 这类持续运动的原语会提示。
+
+**主题。** `config.PAGE_THEMES` 定颜色（page/ink/accent/muted/faint/rule/block/pen）、字体（heavy/sans/mono/hand）、边距、卡片、气泡、进度条和烧录字幕样式；`config.PAGE_THEME` 选当前主题，现有 `white-green`（默认，白底绿）和 `paper-red`（米色纸页、红笔、胶带照片卡）。零件的颜色和字体参数写角色名，换主题或在本期 `L.use_theme(dict(L.theme("white-green"), accent="#..."))` 改几项，不改零件。背景用 `L.page_background(<本期>/assets/page.png)` 写一张主题底色的整画布图，把 `config.BG_VIDEO` 指向它（静图会铺满画布且不动；纸纹等图片也可以直接作背景）。
+
+**零件。** 文字一律用 `page_text`（可传 `[("说了", None), ("好几遍", "accent")]` 分段上色）。
+
+| 要放的东西 | 零件 |
+|---|---|
+| 页眉：等宽小标、大标题、副标题 | `page_title` |
+| 编号、点亮当前编号 | `number_row`、`mark_label` |
+| 左侧目录、短横清单 | `nav_list`、`bullets` |
+| 大数字、引语、等宽胶囊标签 | `figure`、`quote_block`、`tag` |
+| 旧说法（灰字、到点划删除线） | `old_text` |
+| 细线时间轴、坐在轴上的时间块（实黑、绿、浅灰、斜线） | `time_axis`、`time_block` |
+| 方块计量（■■■□，每念一次亮一格） | `meter` |
+| 白色圆角卡片、照片卡、抠图主体 | `card`、`photo_card`、`cutout`（嘴的位置用 `image_point`） |
+| 对话气泡、规整框、手画圈、一笔笔写、“正”字计数 | `speech_bubble`（外框 `bubble_bounds`）、`hl_box`、`pen_circle`、`pen_strokes`、`tally` |
+| 底部分段进度 | `progress` |
+| 逐字一行写出 | `hand_line` |
+
+**从分镜表到页面。** 先按上一节写分镜，图文页每段旁白再写一行：
+
+`旁白原句｜用哪种页（零件组合）｜屏幕上的字（逐字定稿，含哪些词绿色、哪些划掉）｜每个元素绑哪个词（cue/index/offset）｜素材：现有路径，或要生图（用途、提示词、要不要透明底）`
+
+照这张表一行写一个零件调用，片段就出来了；要生图的按[先生图做设计稿](#先生图做设计稿再由代码照着画)交出，落盘后填路径。同一个主体只出现一次：照片卡里放场景，角色另用抠图从卡前出来，不在卡里和卡前各放一只。先做一页关键页的几秒样片定稿，再铺开。
+
+**背景的取舍（2026-10-10 判断）。** 项目通用的流体玻璃背景（`background/background_4k.mp4`，由 `fluid_glass.comp` 生成）整段持续流动，带薄荷色流光、网格、等高线、扫光和一块磨砂玻璃框：流动违背“进来就停住”，薄荷色块会冲淡“绿色只给重点词”，玻璃框也和铺满全页的版式冲突，所以图文页不用它，改用主题底色静图。它作为默认讲解风格的背景本身没有毛病，不为图文页去改。
+
 ## 按需找灵感
 
 有需要时再查参考，不批量抓取、安装或维护风格库。[Prompt Motion](https://www.prompt-motion.com/) 可用于定位作者和提示词；提示词、海报与实际成片质量分开判断，选中后再看成片。具体结构参考：[单一圆点贯穿多个场景](https://www.prompt-motion.com/ultimaxbt-bbebf5)、[同一形状连续切换界面状态](https://www.prompt-motion.com/twoclipping-5cba86)。
@@ -116,6 +148,7 @@ AI 或人工审阅结果后，只把片段保存为 `scene_html/fragment_NN.svg`
 | `type` | 文字逐字出现 | `data-dur` |
 | `fade` / `fade-up` / `fade-left` / `fade-right` | 淡入与位移 | |
 | `zoom` / `pop` / `stamp` | 缩放、落锤与印章 | |
+| `drop` | 照片卡落到纸面：下落、微转后停住 | `data-shift`、`data-spin` |
 | `draw` | 描边生长 | 箭头可用 `marker-end="url(#arrow)"` |
 | `count` | 数字滚动 | `data-to`、`data-decimals`、`data-prefix/suffix` |
 | `grow-bar` / `draw-area` | 横条或面积生长 | `data-grow` |
@@ -125,6 +158,8 @@ AI 或人工审阅结果后，只把片段保存为 `scene_html/fragment_NN.svg`
 | `float` / `drift` / `pulse` | 持续悬浮、漂移、呼吸 | 对应幅度/频率属性 |
 | `holo-3d` / `flip` / `morph` | 3D 面板、卡片翻转、路径形变 | 见 `ADVANCED_FX.md` |
 | `flow-blob` / `burst` / `shockwave` | 流体、粒子和冲击波 | 见 `ADVANCED_FX.md` |
+
+`fade-up` / `fade-left` / `fade-right` / `drop` 可用 `data-shift` 改位移像素。片段里放一个 `<g data-step-fps="12"/>`（`v2lib.step_fps(12)`）时，整场动画按 12fps 定格推进，适合“元素按字进来就停住”的印刷页做法。
 
 所有原语必须只依赖传入的时间 `t`。禁止用 `requestAnimationFrame`、计时器、真实时钟或
 运行时随机数推进渲染状态。
@@ -170,6 +205,8 @@ fragment = (
     + L.num_burst(82, 2900, 1180, suffix="%", cue="八十二")
 )
 ```
+
+图文页版式用 `v2lib` 后半部的图文页零件和 `config.PAGE_THEMES` 主题，做法见上文[图文页](#图文页一页上元素按念到的词进来)。
 
 素材像素尺寸会从 PNG/JPEG 头自动探测；只有 EXIF 或特殊格式确有需要时才在
 `v2lib.DIMS` 添加项目级覆盖。

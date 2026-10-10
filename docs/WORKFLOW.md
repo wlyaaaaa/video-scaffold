@@ -20,6 +20,8 @@
 
 普通生产顺序：scripts → tts → timing → prompts → 审阅 SVG → build → lint → preview/serve → 人工审阅 → render → merge → cover/chapters → 可选 subtitles → verify/manifest → 人工观看。
 
+图文页（写法见 [AUTHORING 图文页](AUTHORING.md#图文页一页上元素按念到的词进来)）沿用同一顺序，只多三处：开工时选 `config.PAGE_THEME`，用 `v2lib.page_background()` 写主题底色图并把 `config.BG_VIDEO` 指向它，设 `CINEMATIC = False`、`TRANSITION_SECONDS = 0`；prompts 之后先写“分镜表 → 页面”那张表，按表生图、写片段；需要烧字幕的看片副本见下文“章节、字幕及交付”。
+
 `pipeline.author.generate()` 保持未绑定；人或当前 AI 直接写静态 SVG 是正常路径，并非缺少自动化。
 
 ## 环境与初始化
@@ -67,6 +69,8 @@ Linux/macOS 使用 Send2Trash。Windows 保留既有受信 PowerShell 回收助�
 chapters.json 使用实际场景编号；第一章从场景 1 开始，之后编号唯一递增。只有 1、4、9 三场时，scene:4 是真实第二场，而非数组第四项。时间必须在成片内，秒级取整后的章节时间仍需严格递增。
 
 subtitles 生成全片 SRT/WebVTT，不烧进画面，并绑定词轴来源。manifest 在 verify 成功后生成 delivery.json，记录成片、封面、章节的哈希和来源；存在字幕时，字幕必须验证通过才可加入清单。
+
+要给本人看或上传的烧字幕副本另做，不改 final_output.mp4 和 delivery.json：`subtitles.karaoke_ass(原文, 词轴, duration)` 按当前主题出 ASS（按标点分句，念到的词用主题的强调色），`subtitles.playable_copy(成片, 输出, ass=…, audio=…)` 给出 1080p H.264 High@4.2、yuv420p、BT.709、AAC、faststart 的 ffmpeg 命令。原文要和词轴逐字对得上（空格和标点不算），对不上直接报错，不猜。
 
 verify 检查完整来源链、视频与音频流、画布、编码、帧率、预期总帧数和总时长、可确定的流时长和起点、PNG 封面以及章节来源和范围。不能用两个同样短的音视频流或文件存在冒充完整交付。READY 只表示自动结构验收通过，不表示人工看过、语音绝对准确或已经投稿。
 

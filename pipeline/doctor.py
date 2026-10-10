@@ -92,6 +92,13 @@ def _background_check() -> Check:
             for stream in probe.get("streams", [])
             if stream.get("codec_type") == "video"
         )
+        if str(config.BG_VIDEO).lower().endswith((".png", ".jpg", ".jpeg")):
+            # a still page background is cover-fit and held; any real size works
+            return _check(
+                "background",
+                int(video.get("width", 0)) > 0 and int(video.get("height", 0)) > 0,
+                f"still {video.get('width')}x{video.get('height')}",
+            )
         rate = str(video.get("r_frame_rate", "0/1"))
         numerator, denominator = (float(part) for part in rate.split("/", 1))
         fps = numerator / denominator if denominator else 0.0

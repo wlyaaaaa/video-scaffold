@@ -28,6 +28,10 @@ from pipeline.indexed_files import indexed_files
 CANVAS = (0, 0, config.WIDTH, config.HEIGHT)
 # frosted-glass safe area computed from the background shader (see md-krijin notes)
 GLASS = (170, 151, 3670, 2009)
+# Page style (a fragment with data-step-fps): elements enter and stay. These
+# primitives keep moving or push/pull, so lint notes them (soft).
+PAGE_CONTINUOUS = ("float", "drift", "pulse", "push", "tilt", "play-head", "move-along",
+                   "flow-blob", "kicker-zoom", "xfade", "fade-out", "holo-3d")
 HARD_TOL = 3  # px past the canvas before we call it a hard overflow
 SOFT_TOL = 8  # px past the glass before we note it
 
@@ -81,6 +85,13 @@ async def _run(scenes, durs, names):
             times = await pg.evaluate("""() => [...document.querySelectorAll('[data-anim]')].flatMap(e => {
               const a=+(e.dataset.delay||0), b=+(e.dataset.dur||1);return [a,a+b/2,a+b];
             })""")
+            # 图文页（片段里有 data-step-fps）要“进来就停住”：持续运动/推拉的原语提示一下
+            moving = await pg.evaluate(
+                """kinds => document.querySelector('[data-step-fps]')
+                  ? [...document.querySelectorAll('[data-anim]')].map(e => e.dataset.anim)
+                      .filter(k => kinds.includes(k)) : []""",
+                list(PAGE_CONTINUOUS),
+            )
             boxes = []
             seen = set()
             for sample in sorted(
@@ -103,6 +114,9 @@ async def _run(scenes, durs, names):
             if errors:
                 raise RuntimeError("scene JavaScript error: " + errors[0])
             nm = names[i] if names and i < len(names) else os.path.basename(html)
+            for kind in sorted(set(moving)):
+                findings.append((nm, "soft", {"tag": f"page-motion {kind}", "l": GLASS[0], "t": GLASS[1],
+                                              "r": GLASS[2], "b": GLASS[3], "txt": "图文页里会持续动/推拉"}))
             for bx in boxes:
                 off_canvas = (
                     bx["l"] < CANVAS[0] - HARD_TOL
