@@ -40,7 +40,10 @@ pwsh -File .\webfilm\run.ps1 render "entries/A/v1" "output/A-detail.mp4" --start
 
 ## 显卡出片与断点
 
-render 默认 auto：一个全屏 Canvas2D 或 WebGL 画布使用 WebCodecs 硬件编码请求，逐帧按绝对时间调用原 render(t)，保留全部编码帧与时间戳；FFmpeg 只封装并合成音轨。可见 DOM/SVG、交互光标或无法证明完整画面的 CSS 效果继续走截图路线。`--renderer webcodecs` 要求快路，`--renderer png` 显式使用原来的 PNG、x264 fast CRF18。硬件编码使用 quality 模式与 120Mbps 请求，不能把该码率直接称为 CRF18 的等价质量，编码器/颜色证据写入来源记录。GPU 绘制与旧软件栅格化可能有抗锯齿差异。
+render 默认 auto：一个全屏 Canvas2D 或 WebGL 画布使用 WebCodecs 硬件编码请求，逐帧按绝对时间调用原 render(t)，保留全部编码帧与时间戳；缓存段拼接后，FFmpeg 实际转换颜色、用 NVENC 再编码，最后合成音轨。可见 DOM/SVG、交互光标或无法证明完整画面的 CSS 效果继续走截图路线。`--renderer webcodecs` 要求快路，`--renderer png` 显式使用原来的 PNG、x264 fast CRF18。Chrome 硬件编码使用 quality 模式与 120Mbps 请求，不能把该码率直接称为 CRF18 的等价质量；最终 NVENC 使用 p7、hq、constqp QP10、High Level 5.2、无 B 帧和 yuv420p。GPU 绘制与旧软件栅格化可能有抗锯齿差异。
+
+硬件路线先用 ffprobe 核验输入：BT.709 矩阵与原色、sRGB 传递曲线、pc 或 tv 范围。zscale 按实际输入范围，将像素及传递曲线真正转换为 BT.709 有限范围（tv），而非只改标签；已经同时符合 BT.709 矩阵、原色、传递曲线和 tv 范围的视频跳过转换，未知颜色拒绝处理。来源记录保留输入与输出颜色、滤镜、编码设置和转换耗时，最终合成后再次核验四项颜色字段。转换与 NVENC 使用同一 GPU 租约；原 PNG 路线不受这一步影响。
+这一步需要本机 FFmpeg 提供 zscale 滤镜和 NVIDIA h264_nvenc 编码器；其他主机可显式使用 `--renderer png`。
 
 Windows 快路开启 Chrome 的共享显卡图像编码路径；渲染器新建的临时画面和匿名浏览器目录在退出后直接删除，失败会报告路径。不会删除作品、成片或断点缓存。原 PNG 路线和显式回收接口保留原来的回收方式。
 

@@ -22,6 +22,40 @@ from .check import check_work, load_work
 from .common import NO_WINDOW, new_output, probe, read_json, run, sha256, temp_workspace, tool, write_json
 
 SAMPLE_RATE = 48000
+COLOR_FIELDS = ("color_space", "color_primaries", "color_transfer", "color_range")
+BT709_TV = dict(zip(COLOR_FIELDS, ("bt709", "bt709", "bt709", "tv")))
+
+
+def normalize_hardware_color(silent_video, temporary, fps):
+    """Convert measured Chrome sRGB YUV to BT.709 limited samples before NVENC."""
+    began = time.monotonic()
+    stream = next(v for v in probe(silent_video)["streams"] if v["codec_type"] == "video")
+    source = {key: stream.get(key) for key in COLOR_FIELDS}
+    evidence = {"source": source, "target": dict(BT709_TV), "filter": None, "encoder": None,
+                "seconds": 0, "converted": False}
+    if source == BT709_TV:
+        evidence["seconds"] = round(time.monotonic()-began, 3)
+        return Path(silent_video), evidence
+    if (source["color_space"], source["color_primaries"], source["color_transfer"]) != ("bt709", "bt709", "iec61966-2-1") or source["color_range"] not in ("pc", "tv"):
+        raise ValueError("Unsupported or unknown hardware video color space: " + json.dumps(source))
+    conversion = ("zscale=min=709:pin=709:tin=iec61966-2-1:rin=" + source["color_range"] +
+                  ":m=709:p=709:t=709:r=limited:dither=error_diffusion,format=yuv420p")
+    output = Path(temporary) / "picture-bt709-tv.mp4"
+    run([tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-i", silent_video,
+         "-map", "0:v:0", "-an", "-vf", conversion, "-c:v", "h264_nvenc", "-preset", "p7",
+         "-tune", "hq", "-rc", "constqp", "-qp", "10", "-pix_fmt", "yuv420p",
+         "-profile:v", "high", "-level:v", "5.2", "-bf", "0", "-r", str(fps),
+         "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+         "-color_range", "tv", "-movflags", "+faststart", output], timeout=3600)
+    converted = next(v for v in probe(output)["streams"] if v["codec_type"] == "video")
+    actual = {key: converted.get(key) for key in COLOR_FIELDS}
+    if actual != BT709_TV:
+        raise RuntimeError("Converted hardware video is not verified BT.709 limited: " + json.dumps(actual))
+    evidence.update(target=actual, filter=conversion, converted=True,
+                    encoder={"name": "h264_nvenc", "preset": "p7", "tune": "hq", "rc": "constqp", "qp": 10,
+                             "pixel_format": "yuv420p", "profile": "high", "level": "5.2", "b_frames": 0},
+                    seconds=round(time.monotonic()-began, 3))
+    return output, evidence
 
 
 def source_timing(record):
@@ -440,6 +474,9 @@ def _render_work(folder, output_path, *, width=3840, height=2160, fps=60, action
             audio_evidence.update(peak=max(abs(v) for v in values)/32768,
                                   rms=math.sqrt(sum(v*v for v in values)/len(values))/32768)
         # Video frame zero and audio sample zero now refer to the same source time.
+        if renderer == "webcodecs":
+            silent_video, color_conversion = normalize_hardware_color(silent_video, temporary, fps)
+            capture_evidence["color_conversion"] = color_conversion
         staged_output = temporary / "complete.mp4"
         run([tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-i", silent_video, "-i", cropped_audio,
              "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "320k",
@@ -447,6 +484,8 @@ def _render_work(folder, output_path, *, width=3840, height=2160, fps=60, action
         info = probe(staged_output)
         video = next(stream for stream in info["streams"] if stream["codec_type"] == "video")
         audio = next(stream for stream in info["streams"] if stream["codec_type"] == "audio")
+        if renderer == "webcodecs" and {key: video.get(key) for key in COLOR_FIELDS} != BT709_TV:
+            raise RuntimeError("Final hardware video failed BT.709 limited color verification")
         if (video["width"], video["height"]) != (width, height) or Fraction(video["avg_frame_rate"]) != fps or int(video.get("nb_frames", -1)) != count:
             raise RuntimeError("Final video dimensions/rate/frame count failed verification")
         if abs(float(video["duration"])-output_duration) > 1/fps or abs(float(audio["duration"])-output_duration) > 1/SAMPLE_RATE:
