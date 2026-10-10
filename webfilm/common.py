@@ -115,7 +115,7 @@ def recycle(path, allowed_root):
 
 
 @contextmanager
-def temp_workspace(output_parent, prefix="webfilm-"):
+def temp_workspace(output_parent, prefix="webfilm-", *, disposable=False):
     explicit = os.environ.get("WEBFILM_TEMP")
     root = Path(explicit) if explicit else Path(output_parent).resolve() / ".webfilm-tmp"
     root.mkdir(parents=True, exist_ok=True)
@@ -123,7 +123,10 @@ def temp_workspace(output_parent, prefix="webfilm-"):
     try:
         yield path
     finally:
-        recycle(path, root)
+        if disposable:
+            shutil.rmtree(path)
+        else:
+            recycle(path, root)
 
 
 def new_output(path):

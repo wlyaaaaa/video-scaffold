@@ -22,6 +22,40 @@ from .check import check_work, load_work
 from .common import NO_WINDOW, new_output, probe, read_json, run, sha256, temp_workspace, tool, write_json
 
 SAMPLE_RATE = 48000
+COLOR_FIELDS = ("color_space", "color_primaries", "color_transfer", "color_range")
+BT709_TV = dict(zip(COLOR_FIELDS, ("bt709", "bt709", "bt709", "tv")))
+
+
+def normalize_hardware_color(silent_video, temporary, fps):
+    """Convert measured Chrome sRGB YUV to BT.709 limited samples before NVENC."""
+    began = time.monotonic()
+    stream = next(v for v in probe(silent_video)["streams"] if v["codec_type"] == "video")
+    source = {key: stream.get(key) for key in COLOR_FIELDS}
+    evidence = {"source": source, "target": dict(BT709_TV), "filter": None, "encoder": None,
+                "seconds": 0, "converted": False}
+    if source == BT709_TV:
+        evidence["seconds"] = round(time.monotonic()-began, 3)
+        return Path(silent_video), evidence
+    if (source["color_space"], source["color_primaries"], source["color_transfer"]) != ("bt709", "bt709", "iec61966-2-1") or source["color_range"] not in ("pc", "tv"):
+        raise ValueError("Unsupported or unknown hardware video color space: " + json.dumps(source))
+    conversion = ("zscale=min=709:pin=709:tin=iec61966-2-1:rin=" + source["color_range"] +
+                  ":m=709:p=709:t=709:r=limited:dither=error_diffusion,format=yuv420p")
+    output = Path(temporary) / "picture-bt709-tv.mp4"
+    run([tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-i", silent_video,
+         "-map", "0:v:0", "-an", "-vf", conversion, "-c:v", "h264_nvenc", "-preset", "p7",
+         "-tune", "hq", "-rc", "constqp", "-qp", "10", "-pix_fmt", "yuv420p",
+         "-profile:v", "high", "-level:v", "5.2", "-bf", "0", "-r", str(fps),
+         "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+         "-color_range", "tv", "-movflags", "+faststart", output], timeout=3600)
+    converted = next(v for v in probe(output)["streams"] if v["codec_type"] == "video")
+    actual = {key: converted.get(key) for key in COLOR_FIELDS}
+    if actual != BT709_TV:
+        raise RuntimeError("Converted hardware video is not verified BT.709 limited: " + json.dumps(actual))
+    evidence.update(target=actual, filter=conversion, converted=True,
+                    encoder={"name": "h264_nvenc", "preset": "p7", "tune": "hq", "rc": "constqp", "qp": 10,
+                             "pixel_format": "yuv420p", "profile": "high", "level": "5.2", "b_frames": 0},
+                    seconds=round(time.monotonic()-began, 3))
+    return output, evidence
 
 
 def source_timing(record):
@@ -260,6 +294,42 @@ def encode_arguments(fps, output):
 
 
 def render_work(folder, output_path, *, width=3840, height=2160, fps=60, actions_path=None, max_duration=120,
+                generic=False, entry=None, duration=20, seed=829, start=0, end=None, renderer="auto",
+                verify_frames=False):
+    """Choose the hardware canvas route without changing the compatibility rasterizer."""
+    if renderer not in ("auto", "png", "webcodecs"):
+        raise ValueError("Unknown renderer")
+    parameters = dict(width=width, height=height, fps=fps, actions_path=actions_path, max_duration=max_duration,
+                      generic=generic, entry=entry, duration=duration, seed=seed, start=start, end=end,
+                      verify_frames=verify_frames)
+    if generic or actions_path or renderer == "png":
+        if renderer == "webcodecs" and (generic or actions_path):
+            raise ValueError("Direct canvas encoding does not capture generic pages or DOM action overlays")
+        return _render_work(folder, output_path, **parameters)
+    from .webcodecs import CanvasUnsupported, hardware_lease
+    began = time.monotonic()
+    fallback = None
+    try:
+        root, config = load_work(folder, max_duration=max_duration)
+        dimensions(width, height, fps)
+        frame_range(config["duration"], fps, start, end)
+        with hardware_lease() as lease:
+            identity = _render_work(folder, output_path, renderer="webcodecs", lease=lease, **parameters)
+    except CanvasUnsupported as error:
+        if renderer == "webcodecs":
+            raise
+        fallback = str(error)
+        print("webfilm canvas route unavailable: " + fallback, flush=True)
+        identity = _render_work(folder, output_path, **parameters)
+    identity["elapsed_seconds"] = round(time.monotonic()-began, 3)
+    if fallback:
+        identity["rendering"]["fallback_reason"] = fallback
+    write_json(str(output_path) + ".json", identity)
+    return identity
+
+
+def _render_work(folder, output_path, *, width=3840, height=2160, fps=60, actions_path=None, max_duration=120,
+                renderer="png", lease=None, verify_frames=False,
                 generic=False, entry=None, duration=20, seed=829, start=0, end=None):
     dimensions(width, height, fps)
     if generic:
@@ -293,14 +363,16 @@ def render_work(folder, output_path, *, width=3840, height=2160, fps=60, actions
     if sidecar.exists() or frame_sidecar.exists() or final_audio.exists():
         raise FileExistsError("Render evidence already exists; use a new output filename")
     frames, elapsed = [], time.monotonic()
-    with temp_workspace(output.parent, "render-") as temporary:
+    capture_evidence = {"backend": "CDP PNG + libx264 fast CRF18"}
+    with temp_workspace(output.parent, "render-", disposable=renderer == "webcodecs") as temporary:
         audio_path = temporary / "generated.wav"
         silent_video = temporary / "picture.mp4"
         audio_evidence = {"source": "none", "rate": SAMPLE_RATE, "length": round(config["duration"]*SAMPLE_RATE), "channels": 2}
         init_script = None
         if generic:
             init_script = "(" + (Path(__file__).parent / "generic.js").read_text(encoding="utf-8") + ")(" + __import__("json").dumps({"seed": seed, "duration": duration, "rate": SAMPLE_RATE}) + ")"
-        with work_page(root, config, output.parent, width=width, height=height, init_script=init_script, require_api=not generic) as (page, runtime):
+        with work_page(root, config, output.parent, width=width, height=height, init_script=init_script,
+                       require_api=not generic, hardware=renderer == "webcodecs") as (page, runtime):
             if generic:
                 pass  # All scheduled/interactive audio events are collected first.
             elif config.get("audio") == "generated":
@@ -314,50 +386,58 @@ def render_work(folder, output_path, *, width=3840, height=2160, fps=60, actions
                 run([tool("ffmpeg"), "-v", "error", "-f", "lavfi", "-i", f"anullsrc=r={SAMPLE_RATE}:cl=stereo", "-t", str(config["duration"]), "-c:a", "pcm_s16le", audio_path])
                 audio_evidence["sha256"] = sha256(audio_path)
             actor = Actions(page, actions)
-            client = page.context.new_cdp_session(page)
-            log = temporary / "encoder.log"
-            with log.open("wb") as error_log:
-                encoder = subprocess.Popen(encode_arguments(fps, silent_video), stdin=subprocess.PIPE,
-                                           stdout=subprocess.DEVNULL, stderr=error_log, creationflags=NO_WINDOW)
-                timed_out = threading.Event()
-                def stop_encoder():
-                    if encoder.poll() is None:
-                        timed_out.set()
-                        encoder.kill()  # Break a blocked stdin write as well.
-                watchdog = threading.Timer(max(180, end_frame*1.5), stop_encoder)
-                watchdog.daemon = True
-                watchdog.start()
-                try:
-                    for index in range(0 if actions or generic else start_frame, end_frame):
-                        t = index / fps
-                        advance_frame(page, actor, t, generic=generic)
-                        if index % 60 == 0:
-                            assert_runtime(page, runtime)
-                        if index < start_frame:
-                            continue
-                        png = base64.b64decode(client.send("Page.captureScreenshot", {"format": "png", "fromSurface": True,
-                                                                                   "captureBeyondViewport": False, "optimizeForSpeed": True})["data"])
-                        with Image.open(io.BytesIO(png)) as frame:
-                            if frame.size != (width, height):
-                                raise RuntimeError("Chrome returned a screenshot with the wrong dimensions")
-                            pixels = frame.convert("RGB").tobytes()
-                            frames.append(hashlib.sha256(pixels).hexdigest())
-                        encoder.stdin.write(png)
-                        if (index-start_frame) % 300 == 0 or index == end_frame - 1:
-                            print(f"webfilm frame {index-start_frame+1}/{count} t={t:.3f}s elapsed={time.monotonic()-elapsed:.1f}s", flush=True)
-                    encoder.stdin.close()
-                    encoder.wait(timeout=600)
-                    if encoder.returncode:
-                        if timed_out.is_set():
-                            raise TimeoutError("Frame capture/encoding exceeded its host-clock deadline")
-                        raise RuntimeError("Video encoding failed: " + log.read_text(encoding="utf-8", errors="replace")[-5000:])
-                except BaseException:
-                    if encoder.poll() is None:
-                        encoder.kill()
-                    encoder.wait(timeout=10)
-                    raise
-                finally:
-                    watchdog.cancel()
+            if renderer == "webcodecs":
+                from .cache import capture_segments
+                runtime["lease"] = lease
+                frames, capture_evidence = capture_segments(page, runtime, root, report, config, output.parent,
+                                                           temporary, silent_video, width, height, fps,
+                                                           start_frame, end_frame, verify_frames=verify_frames)
+                runtime.pop("lease")
+            else:
+                client = page.context.new_cdp_session(page)
+                log = temporary / "encoder.log"
+                with log.open("wb") as error_log:
+                    encoder = subprocess.Popen(encode_arguments(fps, silent_video), stdin=subprocess.PIPE,
+                                               stdout=subprocess.DEVNULL, stderr=error_log, creationflags=NO_WINDOW)
+                    timed_out = threading.Event()
+                    def stop_encoder():
+                        if encoder.poll() is None:
+                            timed_out.set()
+                            encoder.kill()  # Break a blocked stdin write as well.
+                    watchdog = threading.Timer(max(180, end_frame*1.5), stop_encoder)
+                    watchdog.daemon = True
+                    watchdog.start()
+                    try:
+                        for index in range(0 if actions or generic else start_frame, end_frame):
+                            t = index / fps
+                            advance_frame(page, actor, t, generic=generic)
+                            if index % 60 == 0:
+                                assert_runtime(page, runtime)
+                            if index < start_frame:
+                                continue
+                            png = base64.b64decode(client.send("Page.captureScreenshot", {"format": "png", "fromSurface": True,
+                                                                                       "captureBeyondViewport": False, "optimizeForSpeed": True})["data"])
+                            with Image.open(io.BytesIO(png)) as frame:
+                                if frame.size != (width, height):
+                                    raise RuntimeError("Chrome returned a screenshot with the wrong dimensions")
+                                pixels = frame.convert("RGB").tobytes()
+                                frames.append(hashlib.sha256(pixels).hexdigest())
+                            encoder.stdin.write(png)
+                            if (index-start_frame) % 300 == 0 or index == end_frame - 1:
+                                print(f"webfilm frame {index-start_frame+1}/{count} t={t:.3f}s elapsed={time.monotonic()-elapsed:.1f}s", flush=True)
+                        encoder.stdin.close()
+                        encoder.wait(timeout=600)
+                        if encoder.returncode:
+                            if timed_out.is_set():
+                                raise TimeoutError("Frame capture/encoding exceeded its host-clock deadline")
+                            raise RuntimeError("Video encoding failed: " + log.read_text(encoding="utf-8", errors="replace")[-5000:])
+                    except BaseException:
+                        if encoder.poll() is None:
+                            encoder.kill()
+                        encoder.wait(timeout=10)
+                        raise
+                    finally:
+                        watchdog.cancel()
             assert_runtime(page, runtime)
             if generic:
                 # Collect timers scheduled at the final audio boundary without
@@ -394,6 +474,9 @@ def render_work(folder, output_path, *, width=3840, height=2160, fps=60, actions
             audio_evidence.update(peak=max(abs(v) for v in values)/32768,
                                   rms=math.sqrt(sum(v*v for v in values)/len(values))/32768)
         # Video frame zero and audio sample zero now refer to the same source time.
+        if renderer == "webcodecs":
+            silent_video, color_conversion = normalize_hardware_color(silent_video, temporary, fps)
+            capture_evidence["color_conversion"] = color_conversion
         staged_output = temporary / "complete.mp4"
         run([tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-i", silent_video, "-i", cropped_audio,
              "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "320k",
@@ -401,6 +484,8 @@ def render_work(folder, output_path, *, width=3840, height=2160, fps=60, actions
         info = probe(staged_output)
         video = next(stream for stream in info["streams"] if stream["codec_type"] == "video")
         audio = next(stream for stream in info["streams"] if stream["codec_type"] == "audio")
+        if renderer == "webcodecs" and {key: video.get(key) for key in COLOR_FIELDS} != BT709_TV:
+            raise RuntimeError("Final hardware video failed BT.709 limited color verification")
         if (video["width"], video["height"]) != (width, height) or Fraction(video["avg_frame_rate"]) != fps or int(video.get("nb_frames", -1)) != count:
             raise RuntimeError("Final video dimensions/rate/frame count failed verification")
         if abs(float(video["duration"])-output_duration) > 1/fps or abs(float(audio["duration"])-output_duration) > 1/SAMPLE_RATE:
@@ -408,11 +493,16 @@ def render_work(folder, output_path, *, width=3840, height=2160, fps=60, actions
         # Check again after encoding so no input mutation escapes the binding.
         if report["files"] != check_work(root, max_duration=max_duration, config=config)["files"] or (actions_path and actions_hash != sha256(actions_path)):
             raise RuntimeError("Original inputs changed during encoding; refusing stale source binding")
+        if lease:
+            lease.check()
         staged_output.replace(output)
         cropped_audio.replace(final_audio)
-    write_json(frame_sidecar, {"schema": "webfilm.frames.v1", "pixel_format": "RGB24", "width": width,
+    write_json(frame_sidecar, {"schema": "webfilm.frames.v2" if renderer == "webcodecs" else "webfilm.frames.v1",
+                              "pixel_format": "RGB24", "width": width,
                               "height": height, "fps": fps, "duration": output_duration,
-                              "source_duration": config["duration"], "source_range": interval, "sha256": frames})
+                              "source_duration": config["duration"], "source_range": interval, "sha256": frames,
+                              "frame_count": count,
+                              "frame_indices": capture_evidence.get("frame_indices", list(range(start_frame, end_frame)))})
     report.update(scope="static + complete runtime render" if complete else "static + partial runtime render", runtime=runtime_evidence)
     identity = {"schema": "webfilm.render.v1", "work": report, "frame_count": count, "width": width, "height": height,
                 "fps": fps, "duration": output_duration, "source_duration": config["duration"], "source_range": interval,
@@ -421,6 +511,7 @@ def render_work(folder, output_path, *, width=3840, height=2160, fps=60, actions
                 "capture_mode": "external webpage clock" if generic else "optional explicit-time work API",
                 "seed": config.get("seed", 829),
                 "entrypoint": config.get("entry", "index.html"),
+                "rendering": capture_evidence,
                 "elapsed_seconds": round(time.monotonic()-elapsed, 3), "probe": info}
     write_json(sidecar, identity)
     return identity
@@ -437,13 +528,23 @@ def compare_renders(left, right):
         if sha256(str(path) + ".wav") != identity["audio"]["sha256"]:
             raise ValueError("Offline soundtrack no longer matches its render identity")
     parameters = ("width", "height", "fps", "duration")
-    mismatches = [i for i, pair in enumerate(zip(a["sha256"], b["sha256"])) if pair[0] != pair[1]]
+    def indexed(manifest):
+        base = round(source_timing(manifest)[1][0]*manifest["fps"])
+        indices = manifest.get("frame_indices", list(range(base, base+len(manifest["sha256"]))))
+        if len(indices) != len(manifest["sha256"]) or indices != sorted(set(indices)):
+            raise ValueError("Invalid sampled source frame indices")
+        return dict(zip(indices, manifest["sha256"]))
+    ah, bh = indexed(a), indexed(b)
+    sampled_indices = sorted(ah.keys() & bh.keys())
+    base = round(source_timing(a)[1][0]*a["fps"])
+    mismatches = [i-base for i in sampled_indices if ah[i] != bh[i]]
     same_range = source_timing(a) == source_timing(b)
     for manifest, identity in ((a, ia), (b, ib)):
         if "duration" in identity and source_timing(manifest) != source_timing(identity):
             raise ValueError("Frame manifest and render identity disagree about their source range")
     same_parameters = all(a[key] == b[key] for key in parameters) and same_range
-    same_count = len(a["sha256"]) == len(b["sha256"])
+    counts = [m.get("frame_count", len(m["sha256"])) for m in (a, b)]
+    same_count = counts[0] == counts[1]
     audio_equal = ia["audio"]["sha256"] == ib["audio"]["sha256"]
     encoded_equal = ia["output_sha256"] == ib["output_sha256"]
     encoded_mismatches = []
@@ -456,12 +557,15 @@ def compare_renders(left, right):
         encoded_mismatches = [i for i, values in enumerate(zip(ha, hb)) if values[0] != values[1]]
         if len(ha) != len(hb):
             encoded_mismatches += list(range(min(len(ha), len(hb)), max(len(ha), len(hb))))
-    return {"schema": "webfilm.compare.v1", "pass": same_parameters and same_count and not mismatches and audio_equal and not encoded_mismatches,
+    complete_pixels = len(sampled_indices) == counts[0] == counts[1]
+    return {"schema": "webfilm.compare.v1", "pass": same_parameters and same_count and bool(sampled_indices) and not mismatches and audio_equal and not encoded_mismatches,
             "parameters_equal": same_parameters, "source_ranges_equal": same_range,
-            "source_ranges": [source_timing(a)[1], source_timing(b)[1]], "frame_counts": [len(a["sha256"]), len(b["sha256"])],
+            "source_ranges": [source_timing(a)[1], source_timing(b)[1]], "frame_counts": counts,
+            "sampled_frame_indices": sampled_indices, "all_source_frames_compared": complete_pixels,
             "mismatched_frames": mismatches, "offline_audio_equal": audio_equal,
             "mp4_bytes_equal": encoded_equal, "encoded_frame_mismatches": encoded_mismatches, "current_bytes_verified": True,
-            "scope": "Every captured RGB frame and offline PCM WAV, bound to current output bytes; MP4s are byte-identical or decoded frame-by-frame. Fixed installed Chrome and host."}
+            "scope": ("Every source RGB frame" if complete_pixels else "Recorded source RGB samples") +
+                     " and offline PCM WAV, bound to current bytes; MP4s byte-identical or decoded frame-by-frame. Fixed Chrome and host."}
 
 
 def render_stills(folder, output_dir, *, at, width=3840, height=2160, actions_path=None, max_duration=120):
