@@ -24,11 +24,15 @@ from pipeline.io_utils import safe_print as print
 from pipeline.indexed_files import indexed_basename, indexed_files
 from pipeline.recycle import recycle_generated
 
-DESIGN_RULES = f"""设计契约（必须遵守）：
-- 画布 3840x2160，<svg id="stage"> 内只写静态 SVG 片段，不要写 <html>/<style>/<script>。
-- 背景全透明；文字深黛绿 {config.INK}；强调线/箭头浅绿 {config.ACCENT}（或 url(#accent-grad)）。
-- 禁止：边框、卡片、阴影、毛玻璃。版式留白克制，体现高级感。
+DESIGN_RULES = """SVG 通用契约（任何视觉方向都必须遵守）：
+- 画布 3840x2160，只写 <svg id="stage"> 内的静态 SVG 片段，不要写外层 <svg> 或 <html>/<style>/<script>。
+- 背景全透明。
 - 定位用「外层 <g transform="translate(x,y)"> 属性」；动画放在「内层 <g data-anim>」（无 transform 属性）。
+- 动画由 window.seekTime(t) 按绝对时间确定画面，不自行用计时器、真实时钟或运行时随机数推进状态。
+"""
+
+DEFAULT_VISUAL_DIRECTION = f"""采用绿系、留白克制的版式：文字深黛绿 {config.INK}，强调线/箭头浅绿 {config.ACCENT}（或 url(#accent-grad)）。
+按内容选择视觉表达；角色、水彩质感以及有意义的卡片、边框、阴影或毛玻璃均可使用，避免无意义装饰。
 """
 
 ANIMATION_GUIDE = """可用动画（data-anim + data-delay/data-dur 秒）：
@@ -47,8 +51,9 @@ def _transcript(srt_path):
     return "".join(w["word"] for w in words)
 
 
-def build_prompt(script_text, srt_path, asset_path=None):
+def build_prompt(script_text, srt_path, asset_path=None, visual_direction=None):
     transcript = _transcript(srt_path)
+    direction = (visual_direction or "").strip() or DEFAULT_VISUAL_DIRECTION
     if asset_path:
         asset = Path(asset_path)
         if not asset.is_absolute():
@@ -58,10 +63,14 @@ def build_prompt(script_text, srt_path, asset_path=None):
 （用 <image href=\"{asset_uri}\"> 引入，建议配 data-anim=\"float\"）"""
     else:
         asset_guide = "【本场景可用素材】无（不要虚构素材路径）"
-    return f"""你是顶级动态信息图设计师。请为下面这一段旁白设计「一个场景」的前景 SVG 片段。
+    return f"""你是视觉叙事创作者。请为下面这一段旁白设计「一个场景」的前景 SVG 片段。
 
 先结合本工程 docs/AUTHORING.md 选择能讲清内容的画面：让明确的主体发生有意义的变化，
-按内容选流程、结构、比例或关系等表达；文字服务于画面，不把整段旁白搬上屏幕。
+按内容选择角色动作、物件变化、流程、结构或比例等表达；文字服务于画面，不把整段旁白搬上屏幕。
+
+【本期视觉方向】
+{direction}
+本期视觉方向决定画风与呈现方式，不覆盖 SVG 通用契约中的片段格式、透明背景、定位与动画分离或绝对时间约束。
 
 【旁白文案】
 {script_text}
@@ -83,8 +92,14 @@ def assemble_all(
     assets=None,
     out_dir=config.DIR_SCENE,
 ):
-    """Write scene_html/prompt_NN.txt for every script. Returns the prompt list."""
+    """Write prompts, using optional scripts_dir/visual-direction.md plain text."""
     scripts = indexed_files(os.path.join(scripts_dir, "script_*.txt"))
+    direction_path = Path(scripts_dir) / "visual-direction.md"
+    visual_direction = (
+        direction_path.read_text(encoding="utf-8-sig").strip()
+        if direction_path.exists()
+        else None
+    )
     assets = assets or sorted(glob.glob(os.path.join(config.DIR_ASSETS, "*.png")))
     prepared = []
     for position, (index, script) in enumerate(scripts.items()):
@@ -92,7 +107,7 @@ def assemble_all(
             text = source.read().strip()
         srt = os.path.join(srt_dir, indexed_basename("srt", index, ".json"))
         asset = assets[position % len(assets)] if assets else None
-        prompt = build_prompt(text, srt, asset)
+        prompt = build_prompt(text, srt, asset, visual_direction)
         output = os.path.join(out_dir, indexed_basename("prompt", index, ".txt"))
         prepared.append((output, prompt))
 

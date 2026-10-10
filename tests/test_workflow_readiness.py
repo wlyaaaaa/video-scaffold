@@ -242,6 +242,78 @@ class IndexedFileContractTests(unittest.TestCase):
             self.assertEqual("accepted prompt", accepted.read_text(encoding="utf-8"))
 
 
+class AuthorPromptTests(unittest.TestCase):
+    def _assert_svg_contract(self, prompt: str) -> None:
+        for requirement in (
+            "3840x2160",
+            '<svg id="stage">',
+            "静态 SVG 片段",
+            "<html>/<style>/<script>",
+            "背景全透明",
+            '<g transform="translate(x,y)">',
+            "<g data-anim>",
+            "无 transform 属性",
+            "window.seekTime(t)",
+            "绝对时间",
+        ):
+            self.assertIn(requirement, prompt)
+
+    def test_author_legacy_entry_keeps_default_visual_direction(self) -> None:
+        from pipeline import author
+
+        with tempfile.TemporaryDirectory() as temporary:
+            prompt = author.build_prompt("讲清一个变化", str(Path(temporary) / "srt.json"))
+
+        self.assertIn("讲清一个变化", prompt)
+        self.assertIn(author.config.INK, prompt)
+        self.assertIn(author.config.ACCENT, prompt)
+        self.assertIn("留白", prompt)
+        self.assertNotIn("动态信息图设计师", prompt)
+        self.assertNotIn("禁止：边框、卡片、阴影、毛玻璃", prompt)
+        self._assert_svg_contract(prompt)
+
+    def test_author_explicit_direction_coexists_with_svg_contract(self) -> None:
+        from pipeline import author
+
+        direction = "用角色的动作推进故事，采用暖色水彩；有意义的卡片表示人物拿到的信件。"
+        with tempfile.TemporaryDirectory() as temporary:
+            prompt = author.build_prompt(
+                "角色拿到了信", str(Path(temporary) / "srt.json"), None, direction
+            )
+
+        self.assertIn(direction, prompt)
+        self.assertNotIn(author.DEFAULT_VISUAL_DIRECTION, prompt)
+        self.assertNotIn("禁止：边框、卡片、阴影、毛玻璃", prompt)
+        self._assert_svg_contract(prompt)
+
+    def test_author_assemble_consumes_direction_and_empty_uses_default(self) -> None:
+        from pipeline import author
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            for index in (1, 3):
+                (scripts / f"script_{index:02d}.txt").write_text("本场旁白", encoding="utf-8")
+            direction_path = scripts / "visual-direction.md"
+            for direction in (None, "角色水彩叙事，卡片展示一封信。", "  \n\t"):
+                with self.subTest(direction=direction):
+                    if direction is not None:
+                        direction_path.write_text(direction, encoding="utf-8-sig")
+                    prompts = author.assemble_all(
+                        str(scripts), str(root / "srt"), assets=[], out_dir=str(root / "scenes")
+                    )
+                    self.assertEqual(2, len(prompts))
+                    for index, prompt in zip((1, 3), prompts):
+                        expected = direction.strip() if direction else ""
+                        self.assertIn(expected or author.DEFAULT_VISUAL_DIRECTION, prompt)
+                        self.assertEqual(
+                            prompt,
+                            (root / "scenes" / f"prompt_{index:02d}.txt").read_text(encoding="utf-8"),
+                        )
+                        self._assert_svg_contract(prompt)
+
+
 class GenericProjectTests(unittest.TestCase):
     def test_author_prompt_uses_a_real_file_uri_for_assets(self) -> None:
         from pipeline.author import build_prompt
