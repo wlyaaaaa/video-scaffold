@@ -101,7 +101,8 @@ def check_work(folder, *, max_duration=120, config=None):
             links += parser.resources
             if parser.media:
                 errors.append(f"{relative}: audio/video elements are forbidden; use generated Web Audio")
-        links += re.findall(r"url\(\s*['\"]?([^)'\"\s]+)", text, re.I)
+        # CSS url(...) only; script calls such as new URL(name, base) or URL.createObjectURL(...) are not resources.
+        links += re.findall(r"(?<![\w.$])(?<!new )url\(\s*['\"]?([^)'\"\s]+)", text, re.I)
         links += re.findall(r"@import\s+['\"]([^'\"]+)", text, re.I)
         links += re.findall(r"(?:\bimport\s*(?:[^'\"]*?from\s*)?|\bimport\s*\()\s*['\"]([^'\"]+)['\"]", text)
         for uri in links:

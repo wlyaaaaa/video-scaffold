@@ -39,6 +39,16 @@ class WebfilmCoreTests(unittest.TestCase):
             self.assertTrue(any("missing" in error for error in report["errors"]))
             self.assertTrue(any("prerecorded" in error for error in report["errors"]))
 
+    def test_script_url_constructors_are_not_css_resources(self):
+        with temp_workspace(Path(__file__).parent, "webfilm-test-") as root:
+            work = root / "work"
+            self.work(work, '<style>p{background:url(missing.png)}</style><script src="app.js"></script>')
+            (work / "app.js").write_text("const a = new URL(manifestURL, document.baseURI);\n"
+                                         "const b = URL.createObjectURL(blob);\n", encoding="utf-8")
+            errors = check_work(work)["errors"]
+            self.assertFalse(any("manifestURL" in error or "blob" in error for error in errors))
+            self.assertTrue(any("missing.png" in error for error in errors))
+
     def test_oversized_duration_and_entry_escape_fail(self):
         with temp_workspace(Path(__file__).parent, "webfilm-test-") as root:
             work = root / "work"
