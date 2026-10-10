@@ -1,9 +1,13 @@
 # 网页代码短片
 
-给模型 [同一份约定](CONTRACT.md)、创作要求和工具，让它写原创网页作品；render 渲染成片，review 审阅，再交回原模型修改一次。`webfilm/` 是独立支路，整体复制后仍可作为 Python 包使用；无需旧分镜、SVG 模板、配音或词轴流程。
+给模型 [同一份约定](CONTRACT.md)、创作要求和工具，让它写原创网页作品；制作中用 preview 实时有声审片，修改后刷新，确定画面后再 render 出片。`webfilm/` 是独立支路，整体复制后仍可作为 Python 包使用；无需旧分镜、SVG 模板、配音或词轴流程。
 
 ```powershell
 pwsh -File .\webfilm\run.ps1 doctor
+pwsh -File .\webfilm\run.ps1 preview "entries/A/v1"
+# 已有配音可在同一声音时钟播放；不调用配音服务，不写入作品。
+pwsh -File .\webfilm\run.ps1 preview "entries/A/v1" --narration "output/narration.wav"
+# 后台只提供地址用 --no-open；预览服务按 Ctrl+C 停止。
 # 发布当天，A/B 获得相同 CONTRACT.md、要求和工具，各生成 entries/<名字>/v1。
 foreach ($name in @('A','B')) {
   pwsh -File .\webfilm\run.ps1 render "entries/$name/v1" "output/$name-v1.mp4"
@@ -32,7 +36,26 @@ pwsh -File .\webfilm\run.ps1 render "entries/A/v1" "output/A-detail.mp4" --start
 
 交互作品在这两个命令中都传入相同 `--actions actions.json`：工具按原时钟重放起点之前的操作，只跳过前段截图和编码，因此重放仍需时间。带声作品先从原片 0 秒安排音频，片段按相同区间裁切；关键帧也执行音频图以保持与整片一致。来源记录注明实际范围，局部通过不等于整片通过。默认时长上限与整片一致，长作品显式使用相同的 `--max-duration`。这些入口只处理约定作品，普通网页仍走 `capture`。
 
-看过关键镜头后再渲整片并 review。模型比较时给双方相同工具和预览机会，仍保留各自 v1、一次审阅修改与 v2。
+看过实时预览后再渲整片，review 用于检查实际成片。模型比较时给双方相同工具和预览机会，仍保留各自 v1、一次审阅修改与 v2。
+
+## 显卡出片与断点
+
+render 默认 auto：一个全屏 Canvas2D 或 WebGL 画布使用 WebCodecs 硬件编码请求，逐帧按绝对时间调用原 render(t)，保留全部编码帧与时间戳；FFmpeg 只封装并合成音轨。可见 DOM/SVG、交互光标或无法证明完整画面的 CSS 效果继续走截图路线。`--renderer webcodecs` 要求快路，`--renderer png` 显式使用原来的 PNG、x264 fast CRF18。硬件编码使用 quality 模式与 120Mbps 请求，不能把该码率直接称为 CRF18 的等价质量，编码器/颜色证据写入来源记录。GPU 绘制与旧软件栅格化可能有抗锯齿差异。
+
+Windows 快路开启 Chrome 的共享显卡图像编码路径；渲染器新建的临时画面和匿名浏览器目录在退出后直接删除，失败会报告路径。不会删除作品、成片或断点缓存。原 PNG 路线和显式回收接口保留原来的回收方式。
+
+默认记录本次范围的首、中、末三个源帧样本；`--verify-frames` 才记录全部源帧像素，会增加读回耗时。compare 明确返回 `all_source_frames_compared` 与采样位置，仍逐帧核对两份 MP4 的解码像素和离线 PCM。抽样不能证明未采到的像素相同。
+
+完整成功段保留在输出目录的 `.webfilm-cache/`，中断后用相同作品、画幅、范围重跑，换一个未存在的输出名称即可恢复；损坏或来源失配的段会重建。缓存段最多两秒，并在声明的场景边界切开。旧作品修改任意输入后重建画面；按场景拆文件的作品可在 work.json 增加可选声明，例如：
+
+```json
+"render_segments": [
+  {"start": 0, "end": 12, "files": ["scene-one.js"]},
+  {"start": 12, "end": 24, "files": ["scene-two.js"]}
+]
+```
+
+范围须完整覆盖作品并落在帧边界。未列出的文件视为全局依赖，共用文件应在所有使用它的场景列出；声明是作者对影响范围的说明，程序不能证明漏报的跨场景状态。修改某场景的文件只重建依赖它的段，源码变更后的采样相同不会作为复用依据。音轨仍从零安排完整母带，最后按原采样位置裁切并合成。缓存属于可再生文件，确认不再需要恢复后可以清理，原件和成片保留。
 
 `demo <新目录>` 只写入不存在或全空的目标目录，是 AI 补充的渲染验收材料。样片含 20 秒水彩纸面动画、12 秒互动网页、8 秒知识卡片、4 秒片头、6 秒片尾和静态封面。打开任一 `index.html` 即可现场播放，点“开启音乐”解锁声音；音乐、低音、轻打击和飞行音效都由代码生成。动作样例在 `interactive/actions.json`。
 

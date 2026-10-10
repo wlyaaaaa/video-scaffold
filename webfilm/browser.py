@@ -66,6 +66,13 @@ def local_server(root):
 
 
 CAPTURE_INIT = r"""({seed}) => {
+  window.__WEBFILM_CANVAS_CONTEXTS__ = new WeakMap();
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function(type, ...args) {
+    const context = getContext.call(this, type, ...args);
+    if (context) window.__WEBFILM_CANVAS_CONTEXTS__.set(this, {type, context});
+    return context;
+  };
   window.__WEBFILM_CAPTURE__ = true;
   window.__WEBFILM_TIME__ = 0;
   window.__WEBFILM_VIOLATIONS__ = [];
@@ -95,10 +102,11 @@ CAPTURE_INIT = r"""({seed}) => {
 
 
 @contextmanager
-def work_page(root, config, parent, *, width, height, capture=True, init_script=None, require_api=True):
+def work_page(root, config, parent, *, width, height, capture=True, init_script=None, require_api=True,
+              hardware=False):
     from playwright.sync_api import sync_playwright
     requests, blocked, failures = [], [], []
-    with temp_workspace(parent, "chrome-") as temporary, local_server(root) as origin:
+    with temp_workspace(parent, "chrome-", disposable=hardware) as temporary, local_server(root) as origin:
         # Playwright itself also writes temporary browser artifacts; direct them
         # to the task-owned directory, never to the user's Chrome profile.
         env = dict(os.environ, TEMP=str(temporary), TMP=str(temporary), TMPDIR=str(temporary))
@@ -108,7 +116,9 @@ def work_page(root, config, parent, *, width, height, capture=True, init_script=
                 viewport={"width": width, "height": height}, device_scale_factor=1,
                 locale="zh-CN", timezone_id="Asia/Shanghai", color_scheme="light",
                 reduced_motion="no-preference", service_workers="block", env=env,
-                args=["--disable-gpu", "--disable-background-networking", "--disable-component-update",
+                args=(["--disable-frame-rate-limit", "--disable-gpu-vsync"] if hardware else ["--disable-gpu"]) +
+                     (["--enable-features=MediaFoundationD3DVideoProcessing,MediaFoundationSharedImageEncode"] if hardware and os.name == "nt" else []) +
+                     ["--disable-background-networking", "--disable-component-update",
                       "--disable-extensions", "--disable-sync", "--force-color-profile=srgb",
                       "--hide-scrollbars"],
             )

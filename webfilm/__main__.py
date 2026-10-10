@@ -29,6 +29,15 @@ def parser():
     render.add_argument("--max-duration", type=float, default=120)
     render.add_argument("--start", type=float, default=0, help="源作品起点秒数，包含，须在60fps帧边界")
     render.add_argument("--end", type=float, help="源作品终点秒数，不包含，默认作品末尾")
+    render.add_argument("--renderer", choices=("auto", "png", "webcodecs"), default="auto",
+                        help="自动用画布硬编；png为兼容截图；webcodecs要求画布硬编")
+    render.add_argument("--verify-frames", action="store_true", help="验收时记录每帧源像素；会增加读回耗时")
+    preview = tasks.add_parser("preview", help="实时有声审片，可拖动进度；不生成视频")
+    preview.add_argument("work")
+    preview.add_argument("--4k", action="store_true")
+    preview.add_argument("--no-open", action="store_true", help="只提供本地预览地址，不打开窗口")
+    preview.add_argument("--narration", help="在同一声音时钟播放已有本地配音，不调用配音服务")
+    preview.add_argument("--max-duration", type=float, default=120)
     stills = tasks.add_parser("stills", help="直接采样作品关键帧，并生成带秒数的小拼图")
     stills.add_argument("work")
     stills.add_argument("output")
@@ -101,11 +110,19 @@ def main(argv=None):
             result = check_work(arguments.work, max_duration=arguments.max_duration)
             if arguments.output:
                 write_json(new_output(arguments.output), result)
+        elif command == "preview":
+            from .preview import serve_preview
+            width, height = (3840, 2160) if arguments.__dict__["4k"] else (1920, 1080)
+            serve_preview(arguments.work, width=width, height=height,
+                          max_duration=arguments.max_duration, open_browser=not arguments.no_open,
+                          narration_path=arguments.narration)
+            return 0
         elif command in ("render", "capture"):
             from .render import render_work
             width, height = (1920, 1080) if arguments.__dict__["1080p"] else (3840, 2160)
             extra = ({"generic": True, "entry": arguments.entry, "duration": arguments.duration, "seed": arguments.seed}
-                     if command == "capture" else {"start": arguments.start, "end": arguments.end})
+                     if command == "capture" else {"start": arguments.start, "end": arguments.end,
+                                                    "renderer": arguments.renderer, "verify_frames": arguments.verify_frames})
             result = render_work(arguments.folder if command == "capture" else arguments.work, arguments.output, width=width, height=height,
                                  actions_path=arguments.actions, max_duration=arguments.max_duration, **extra)
             # The complete inventory and 1200 hashes stay in the sidecars.
