@@ -134,9 +134,10 @@ def capture_segments(page, runtime, root, report, config, parent, temporary, out
                          "-map", "0:v:0", "-c:v", "copy", "-an", "-bsf:v",
                          tags + f",setts=pts=N/({fps}*TB):dts=N/({fps}*TB):duration=1/({fps}*TB)", staged])
                     stream = next(v for v in probe(staged)["streams"] if v["codec_type"] == "video")
+                    # ffprobe prints durations to the microsecond, so e.g. 70 frames at 60 fps reads 1.166667.
                     if (int(stream.get("nb_frames", -1)) != end-start or stream["width"] != width
                             or stream["height"] != height or stream.get("has_b_frames") != 0
-                            or abs(float(stream["duration"])-(end-start)/fps) > 1e-7):
+                            or abs(float(stream["duration"])-(end-start)/fps) > 1e-6):
                         raise RuntimeError("Encoded checkpoint dimensions/frame count failed verification")
                     staged.replace(video)
                 saved = {"schema": "webfilm.checkpoint.v1", "range": [start, end], "frames": hashes,

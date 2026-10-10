@@ -63,6 +63,28 @@ class CacheTests(unittest.TestCase):
                 execute('rebuilt.mp4')
                 self.assertEqual(captured, [120])
 
+    def test_checkpoint_accepts_microsecond_rounded_probe_duration(self):
+        with TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            parent = Path(directory)
+            (parent / "temporary").mkdir()
+            config = {"duration": 70/60, "render_segments": [{"start": 0, "end": 70/60, "files": ["a.js"]}]}
+            report = {"files": [{"path": "index.html", "sha256": "global"}, {"path": "a.js", "sha256": "a"}]}
+            def capture(page, runtime, output, fps, first, last, **kwargs):
+                output.write_bytes(b"encoded")
+                return {"frames": ["first", "last"], "frame_indices": [first, last-1],
+                        "evidence": {"decoder_color_space": {"matrix": "bt709", "primaries": "bt709",
+                                       "transfer": "iec61966-2-1", "fullRange": False}}, "timing": {}}
+            def run(args):
+                Path(args[-1]).write_bytes(b"joined" if "concat" in args else Path(args[args.index("-i")+1]).read_bytes())
+            with patch('webfilm.webcodecs.capture_canvas', capture), patch('webfilm.cache.run', run), \
+                    patch('webfilm.webcodecs.canvas_session', return_value=nullcontext()), \
+                    patch('webfilm.cache.tool', return_value='ffmpeg'), patch('webfilm.check.check_work', side_effect=lambda *a, **k: report), \
+                    patch('webfilm.cache.probe', return_value={"streams": [{"codec_type": "video", "nb_frames": "70",
+                          "width": 3840, "height": 2160, "has_b_frames": 0, "duration": "1.166667"}]}):
+                _, evidence = capture_segments(None, {"chrome": "fixture"}, parent, report, config, parent,
+                                               parent / "temporary", parent / "tail.mp4", 3840, 2160, 60, 0, 70)
+            self.assertEqual([s['reused'] for s in evidence['segments']], [False])
+
     def test_scene_declaration_rejects_gaps_and_unknown_dependencies(self):
         files = [{"path": "a.js"}]
         for scenes in ([{"start": 0, "end": 1, "files": []}], [{"start": 0, "end": 2, "files": ["missing"]}]):
