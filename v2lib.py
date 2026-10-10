@@ -1132,3 +1132,15 @@ def pen_circle(cx, cy, rx, ry, cue=None, delay=0.4, dur=0.25, color=None, width=
     return (f'<g transform="translate({cx:.1f},{cy:.1f}) rotate({rotate})">'
             f'<path data-anim="draw" {_t(cue,delay,dur,offset,index)} d="M{" L".join(pts)}" fill="none" '
             f'stroke="{color}" stroke-width="{width}" stroke-linecap="round" stroke-linejoin="round"/></g>')
+
+
+def hbar(label, value, frac, x, y, w=1600, h=56, cue=None, delay=0.4, dur=1/6, fill=None, size=44, offset=None):
+    """横条对比：上方等宽小标签，条从左长出后停住，数值跟在条尾。frac 是 0—1 的长度。"""
+    th = theme(); fill = _col(fill, "ink"); bw = max(h, w * max(0.0, min(1.0, frac)))
+    at = _t(cue, delay, dur, offset)
+    return (f'<text data-anim="fade" {_t(cue,delay,1/12,offset)} x="{x}" y="{y - h*0.5:.0f}" font-family="{th["mono"]}" '
+            f'font-size="{size}" font-weight="700" letter-spacing="4" fill="{th["muted"]}">{esc(label)}</text>'
+            f'<rect data-anim="wipe" data-dir="left" {at} x="{x}" y="{y}" width="{bw:.0f}" height="{h}" fill="{fill}"/>'
+            f'<text data-anim="fade" {_t(cue, delay + dur, 1/12, (offset or 0) + dur if cue else None)} '
+            f'x="{x + bw + size*0.6:.0f}" y="{y + h*0.5 + size*0.95:.0f}" font-family="{th["heavy"]}" '
+            f'font-size="{size*2.4:.0f}" font-weight="900" fill="{fill}">{esc(value)}</text>')

@@ -96,34 +96,71 @@ def _ass_time(t):
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-def _phrases(text, words):
-    """Split the original text at punctuation and give each phrase its words.
+def align_text(text, words, min_match=0.6):
+    """Map each character of the shown (original) text to the spoken words.
 
-    Words are matched to the text character by character (spaces and
-    punctuation ignored on both sides), so multi-character TTS words work.
+    Returns a list as long as text: (first_word, last_word) or None for
+    punctuation/spaces. Letters, digits and CJK are matched in order; where the
+    narration reads a span differently (“846” spoken as “八百四十六”, “5.5” as
+    “五点五”) the whole differing span maps to the words read for it. Raises
+    ValueError when fewer than min_match of the characters match exactly.
     """
-    skip = set(PHRASE_BREAKS) | set(" 　\"'“”‘’（）()《》")
-    chars = []  # (char, word index)
-    for i, w in enumerate(words):
-        chars += [(ch, i) for ch in w["word"] if ch not in skip]
-    phrases, cur, k = [], [], 0
-    for ch in text:
-        if ch in PHRASE_BREAKS:
-            if cur:
+    import difflib
+
+    tchars = [(i, ch) for i, ch in enumerate(text) if ch.isalnum()]
+    wchars = [(wi, ch) for wi, w in enumerate(words) for ch in str(w["word"]) if ch.isalnum()]
+    a = "".join(ch.lower() for _, ch in tchars)
+    b = "".join(ch.lower() for _, ch in wchars)
+    spans = [None] * len(text)
+    equal = 0
+    opcodes = difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes()
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            equal += i2 - i1
+            for k in range(i2 - i1):
+                wi = wchars[j1 + k][0]
+                spans[tchars[i1 + k][0]] = (wi, wi)
+        elif tag == "replace":
+            for k in range(i1, i2):
+                spans[tchars[k][0]] = (wchars[j1][0], wchars[j2 - 1][0])
+    if tchars and equal < min_match * len(tchars):
+        raise ValueError(f"shown text and spoken words disagree ({equal}/{len(tchars)} characters match)")
+    last = None  # characters never spoken borrow their neighbour's words
+    for i, (_, _ch) in enumerate(tchars):
+        pos = tchars[i][0]
+        if spans[pos] is None and last is not None:
+            spans[pos] = last
+        last = spans[pos] or last
+    first = next((spans[p] for p, _ in tchars if spans[p]), None)
+    for p, _ in tchars:
+        if spans[p] is None:
+            spans[p] = first
+    return spans
+
+
+def _is_break(text, i):
+    ch = text[i]
+    if ch in ".,:" and 0 < i < len(text) - 1 and text[i - 1].isdigit() and text[i + 1].isdigit():
+        return False  # 5.5 / 3,118 / 10:30 stay one token
+    return ch in PHRASE_BREAKS or ch in "\r\n"
+
+
+def _phrases(text, words):
+    """Split the original text at punctuation (and line breaks) into phrases of
+    (char, (first_word, last_word) | None)."""
+    spans = align_text(text, words)
+    phrases, cur = [], []
+    for i, ch in enumerate(text):
+        if _is_break(text, i):
+            if any(s for _, s in cur):
                 phrases.append(cur)
             cur = []
             continue
-        if ch in skip:
-            cur.append((ch, None))
+        if ch.isspace() and not cur:
             continue
-        if k >= len(chars) or chars[k][0] != ch:
-            raise ValueError(f"subtitle text and words disagree at {ch!r} (word char {k})")
-        cur.append((ch, chars[k][1]))
-        k += 1
-    if cur:
+        cur.append((ch, spans[i]))
+    if any(s for _, s in cur):
         phrases.append(cur)
-    if k != len(chars):
-        raise ValueError("subtitle text ends before the words do")
     return phrases
 
 
@@ -137,25 +174,28 @@ def karaoke_ass(text, words, duration=None, theme=None, play_res=(1920, 1080)):
     """
     th = theme if isinstance(theme, dict) else config.PAGE_THEMES[theme or config.PAGE_THEME]
     st = th["subtitle"]
-    phrases = [p for p in _phrases(text, words) if any(i is not None for _, i in p)]
+    phrases = _phrases(text, words)
     on, off = _ass_color(st["active"]) + "&", _ass_color(st["color"]) + "&"
     events = []
+
+    def first_start(ph):
+        return min(words[s[0]]["start"] for _, s in ph if s)
+
     for n, ph in enumerate(phrases):
-        ids = sorted({i for _, i in ph if i is not None})
-        a = words[ids[0]]["start"]
+        ids = sorted({i for _, s in ph if s for i in range(s[0], s[1] + 1)})
+        a = first_start(ph)
         if n + 1 < len(phrases):
-            b = words[min(i for _, i in phrases[n + 1] if i is not None)]["start"]
+            b = max(first_start(phrases[n + 1]), a + 0.01)
         else:
             b = duration if duration is not None else words[ids[-1]]["end"]
         cuts = sorted({a, b, *(min(max(words[i][k], a), b) for i in ids for k in ("start", "end"))})
         for x, y in zip(cuts, cuts[1:]):
             if y - x < 0.005:
                 continue
-            active = next((i for i in ids if words[i]["start"] <= x < words[i]["end"]), None)
             body = ""
-            for ch, i in ph:
+            for ch, s in ph:
                 ch = ch.replace("{", "(").replace("}", ")")
-                hot = i is not None and i == active
+                hot = bool(s) and words[s[0]]["start"] <= x < words[s[1]]["end"]
                 body += "{\\c" + on + "}" + ch + "{\\c" + off + "}" if hot else ch
             events.append(f"Dialogue: 0,{_ass_time(x)},{_ass_time(y)},Sub,,0,0,0,,{body}")
     w, h = play_res

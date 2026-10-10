@@ -20,7 +20,7 @@
 
 普通生产顺序：scripts → tts → timing → prompts → 审阅 SVG → build → lint → preview/serve → 人工审阅 → render → merge → cover/chapters → 可选 subtitles → verify/manifest → 人工观看。
 
-图文页（写法见 [AUTHORING 图文页](AUTHORING.md#图文页一页上元素按念到的词进来)）沿用同一顺序，只多三处：开工时选 `config.PAGE_THEME`，用 `v2lib.page_background()` 写主题底色图并把 `config.BG_VIDEO` 指向它，设 `CINEMATIC = False`、`TRANSITION_SECONDS = 0`；prompts 之后先写“分镜表 → 页面”那张表，按表生图、写片段；需要烧字幕的看片副本见下文“章节、字幕及交付”。
+图文页（写法见 [AUTHORING 图文页](AUTHORING.md#图文页一页上元素按念到的词进来)）可以用已有配音直接走分镜表：`python -m pipeline.pages <表.json> plan` 看每页起止和每个元素的时刻，`stills` 无头抽每页最后一刻，`render` 出 4K 画面轨（默认 CPU H.264，`"encoder": "gpu"` 用配置里的编码器）、拼配音、按主题烧字幕，最后出 1080p 可播放副本。它自己设好主题底色背景、`CINEMATIC = False`、`TRANSITION_SECONDS = 0`，中间文件都在表里 `work` 指的目录，不写进当前工程的 scene_html/output。只取一段配音里的几句时，切点取在前后两词停顿的正中。表改了重跑即可；配音换了（例如单句重配后）重跑会按新词轴重新对时，绑词写的是原文，不用改表。
 
 `pipeline.author.generate()` 保持未绑定；人或当前 AI 直接写静态 SVG 是正常路径，并非缺少自动化。
 

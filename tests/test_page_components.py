@@ -129,7 +129,7 @@ class PageComponentTests(unittest.TestCase):
         red = subtitles.karaoke_ass("下面这些", words[:2], theme="paper-red")
         self.assertIn(config.PAGE_THEMES["paper-red"]["subtitle"]["font"], red)
         with self.assertRaises(ValueError):
-            subtitles.karaoke_ass("上面这些", words[:2])
+            subtitles.karaoke_ass("完全不同的字", words[:2])
 
     def test_playable_copy_is_h264_high_42_faststart(self) -> None:
         from pipeline import subtitles

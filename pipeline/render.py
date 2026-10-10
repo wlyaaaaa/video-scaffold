@@ -492,6 +492,13 @@ async def _worker_loop(
         await browser.close()
 
 
+def _config_state():
+    """Plain upper-case settings of the parent's config module, for workers."""
+    plain = (str, int, float, bool, list, tuple, dict, type(None))
+    return {k: v for k, v in vars(config).items()
+            if k.isupper() and "KEY" not in k and isinstance(v, plain)}
+
+
 def _worker_entry(
     task_queue,
     counter,
@@ -503,7 +510,12 @@ def _worker_entry(
     chunk_frames,
     completed_frames=0,
     chunk_records=None,
+    config_state=None,
 ):
+    # Spawned workers re-import config; carry over the parent's in-process
+    # overrides (a caller that retargets dirs, codec or background at runtime).
+    for name, value in (config_state or {}).items():
+        setattr(config, name, value)
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     asyncio.run(
@@ -646,6 +658,7 @@ def _render_timeline(
                 chunk_frames,
                 completed_frames,
                 chunk_records,
+                _config_state(),
             ),
         )
         p.start()
