@@ -191,6 +191,65 @@ class DiagramTests(unittest.TestCase):
         shown = ["".join(el.itertext()) for el in parse_fragment(frag).iter() if el.get("data-glyph-times")]
         self.assertEqual(shown, ["清手机", "换电脑"])
 
+    def _spoken_not_early(self, frag):
+        checked = 0
+        for el in parse_fragment(frag).iter():
+            txt = "".join(el.itertext())
+            if not el.get("data-glyph-times") or TEXT.find(txt) < 0:
+                continue
+            idx = TEXT.find(txt)
+            for k, at in enumerate(json.loads(el.get("data-glyph-times"))):
+                ct = self.tl.char_time(idx + k)
+                if ct is not None:
+                    self.assertGreaterEqual(at + 1e-6, ct, txt)
+                    checked += 1
+        return checked
+
+    def test_review_layouts_keep_text_on_time_and_finish(self):
+        """交接、奶酪层、闸门、结论胶囊和任务单的聚焦/变淡：原文字不早出，动画能放完。"""
+        elements = [
+            {"verdict": {"text": "真正要的", "doubt_at": "一个小时"}, "at": "真正要的"},
+            {"handoff": {"heads": [{"text": "最后一句", "at": "最后一句"}, {"text": "真正要的", "at": "真正要的"}],
+                         "rows": [{"from": {"label": "流量", "at": "流量"}, "to": {"label": "内存", "at": "内存"},
+                                   "check_at": "磁盘"},
+                                  {"from": {"label": "内存", "at": "磁盘"}, "to": {"label": "全打满", "at": "全打满"}}],
+                         "chain": True}, "at": "最后一句"},
+            {"layers": {"slabs": [{"label": "清手机", "at": "清手机", "holes": [.2, .6]},
+                                  {"label": "换电脑", "at": "换电脑", "holes": [.4, .8]}],
+                        "align": {"at": "毛病", "slab": 1, "to": [.2, .6], "label": "看不出来", "label_at": "看不出来"},
+                        "shots": [{"at": "同一个要求", "lane": .2, "stop": 1, "hit_at": "好几遍", "label": "照旧",
+                                   "label_at": "照旧"},
+                                  {"at": "开始幻觉", "lane": .2, "label": "全打满", "label_at": "全打满"},
+                                  {"at": "注意力", "lane": .6, "glyph": "image", "r": 60}]}, "at": "清手机"},
+            {"gate": {"receiver": {"label": "注意力", "at": "注意力", "slots_at": "更全面"},
+                      "items": [{"text": "清手机", "at": "清手机"}, {"text": "换电脑", "at": "换电脑"},
+                                {"text": "真用过", "at": "真用过", "block_at": "真用过+0.5s", "dim_at": "真用过+1.2s"}],
+                      "barrier_at": "真用过"}, "at": "注意力"},
+            {"deck": [{"at": "毛病", "title": "看不出来", "icon": "clip", "body": [
+                {"kind": "todo", "items": [{"text": "全打满", "at": "全打满", "focus_at": "注意力"},
+                                           {"at": "流量", "dim_at": "注意力"}]}]}]},
+            {"checklist": [{"text": "更全面", "at": "更全面", "icon": "noloop"}]},
+        ]
+        frag = self.build(elements, end=self.tl.duration + 2)
+        self.assertGreater(self._spoken_not_early(frag), 20)
+        self.assertEqual([f for f in pages.unfinished(frag, self.tl.duration + 2) if not f[4]], [])
+        root = parse_fragment(frag)
+        # 被拦下的问题点在洞对齐时淡出；三个问题点都沿路径移动
+        movers = [n for n in root.iter() if n.get("data-anim") == "move-along"]
+        self.assertEqual(len(movers), 3)
+        align_t = pages.cue_time(self.tl, "毛病", 0)[0]
+        self.assertTrue(any(n.get("data-anim") == "fade-out" and abs(float(n.get("data-delay")) - align_t) < 1e-3
+                            for n in root.iter()))
+
+    def test_handoff_and_layers_reject_reversed_time(self):
+        with self.assertRaises(ValueError):
+            self.build([{"handoff": {"rows": [{"from": {"label": "内存", "at": "内存"},
+                                               "to": {"label": "流量", "at": "流量"}}]}, "at": "流量"}])
+        with self.assertRaises(ValueError):
+            self.build([{"gate": {"receiver": {"label": "注意力", "at": "注意力"},
+                                  "items": [{"text": "清手机", "at": "清手机", "block_at": "换电脑",
+                                             "dim_at": "换电脑"}]}, "at": "清手机"}])
+
     def test_bad_time_range_fails(self):
         with self.assertRaises(ValueError):
             self.build([{"time_stretch": {"start_label": "一个小时", "stretch_at": "一整天",
