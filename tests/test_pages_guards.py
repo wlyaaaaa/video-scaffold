@@ -78,6 +78,17 @@ class PageGuardsTests(unittest.TestCase):
         replay = pages.PageBuilder(timeline('甲乙甲'), {'elements': []}, 1, 1, None)
         self.assertEqual([0], replay.glyph_reference('甲'))
 
+    def test_joined_cues_keep_occurrence_and_keys_hidden_intervals(self):
+        b = pages.PageBuilder(timeline('甲乙乙'), {'elements': [
+            {'head': '甲', 'at': '甲', 'sub': [['乙', '乙#2']]}]}, 0, 0, None)
+        self.assertEqual([('乙', 1.0, 2)], list(pages.early_glyphs(b.build(), b)))
+        b = pages.PageBuilder(timeline('甲乙', 12), {'elements': []}, 0, 0, None)
+        b.tl.words[1]['start'] = 8
+        svg = '<text data-anim="type" data-delay="6" data-glyph-times="[6]">乙</text>'
+        hidden = boards.keys([[0, 0, 0, 1, 1], [1, 0, 0, 1, 0], [10, 0, 0, 1, 0], [11, 0, 0, 1, 1]], svg)
+        self.assertEqual([], list(pages.early_glyphs(hidden, b)))
+        self.assertEqual([('乙', 6.0, 8)], list(pages.early_glyphs(svg, b)))
+
 
 if __name__ == '__main__':
     unittest.main()

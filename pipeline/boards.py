@@ -215,6 +215,8 @@ def head(ctx, el):
                 times += [gt[0]] * 3
             line += seg
             times += gt
+            if hasattr(ctx.b, 'record_glyph_join'):
+                ctx.b.record_glyph_join(times, gt)
         out.append(text(ctx, line, x, y + 118, 64, times, font="sans", weight=500, fill="muted", settle=False))
     return "".join(out)
 

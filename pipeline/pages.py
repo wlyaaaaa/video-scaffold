@@ -233,6 +233,12 @@ class PageBuilder:
             self._glyph_arrays[id(times)] = (times, self.glyph_reference(plain, cue, summary))
         return times
 
+    def record_glyph_join(self, times, added):
+        refs = list(self._glyph_arrays.get(id(times), (times, []))[1])
+        refs += [None] * (len(times) - len(added) - len(refs))
+        refs += self._glyph_arrays.get(id(added), (added, [None] * len(added)))[1]
+        self._glyph_arrays[id(times)] = (times, refs)
+
     def record_glyph_svg(self, svg, times):
         node = ET.fromstring(svg)
         entry = self._glyph_arrays.get(id(times))
@@ -477,19 +483,21 @@ def early_glyphs(fragment, builder):
     from pipeline.build_scene import parse_fragment
     used = {}
 
-    def walk(node, visible=0.0, until=None):
+    def walk(node, visible=0.0, until=None, windows=None):
         kind = node.get('data-anim')
         delay = float(node.get('data-delay', 0))
         until = builder.end - builder.start if until is None else until
+        windows = [(0, until)] if windows is None else windows
         if kind and kind not in ('fade-out', 'xfade', 'keys', 'wave', 'shake'):
             visible = max(visible, delay)
         if kind in ('fade-out', 'xfade'):
             until = min(until, delay + float(node.get('data-dur', 1)))
         if kind == 'keys':
             track = json.loads(node.get('data-keys'))
-            if track and track[0][4] <= 0:
-                first = next((i for i, k in enumerate(track) if k[4] > 0), None)
-                visible = max(visible, track[max(0, first - 1)][0]) if first is not None else until
+            extended = [[0, *track[0][1:]], *track, [until, *track[-1][1:]]]
+            spans = [(a[0], b[0]) for a, b in zip(extended, extended[1:]) if a[4] > 0 or b[4] > 0]
+            windows = [(max(a, x), min(z, y)) for a, z in windows for x, y in spans
+                       if max(a, x) < min(z, y)]
         if node.get('data-glyph-times'):
             plain = ''.join(node.itertext())
             times = json.loads(node.get('data-glyph-times'))
@@ -500,11 +508,12 @@ def early_glyphs(fragment, builder):
             idx = used.get(key, 0); used[key] = idx + 1
             refs = candidates[min(idx, len(candidates) - 1)]
             for ch, t, spoken in zip(plain, times, refs):
-                shown = max(visible, t)
+                shown = min((max(visible, t, a) for a, z in windows if max(visible, t, a) < min(until, z)),
+                            default=until)
                 if spoken is not None and t < 9000 and shown < until and builder.start + shown + 0.001 < spoken:
                     yield ch, builder.start + shown, spoken
         for child in node:
-            yield from walk(child, visible, until)
+            yield from walk(child, visible, until, windows)
 
     yield from walk(parse_fragment(fragment))
 
