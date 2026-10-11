@@ -204,6 +204,7 @@ class PageBuilder:
         self.options = {}
         self.prepare_assets = prepare_assets
         self.glyph_sources = {}
+        self.check_only = {id(self.out): set(), id(self.mout): set()}
         self._glyph_arrays = {}
 
     def glyph_reference(self, plain, cue=None, summary=False, replay_at=None):
@@ -320,6 +321,8 @@ class PageBuilder:
         self.marks.append((el, d))
         if el.get("hold_check") == "warn":    # 已审定的旧页：退场检查只提示，不拦出片
             for out, first in ((self.out, before_out), (self.mout, before_media)):
+                if el.get("preserve_svg"):
+                    continue
                 content = "".join(out[first:]); del out[first:]
                 out.append(f'<g data-hold-check="warn">{content}</g>')
         if el.get("exit_at"):
@@ -330,6 +333,8 @@ class PageBuilder:
                            f'{content}</g>')
         from pipeline.build_scene import parse_fragment
         for pieces, first in ((self.out, before_out), (self.mout, before_media)):
+            if el.get("hold_check") == "warn" and el.get("preserve_svg"):
+                self.check_only[id(pieces)].update(range(first, len(pieces)))
             for node in parse_fragment(''.join(pieces[first:])).iter():
                 if node.get('data-glyph-times') and _glyph_key(node) not in self.glyph_sources:
                     self.glyph_sources[_glyph_key(node)] = [self.glyph_reference(
@@ -464,8 +469,14 @@ class PageBuilder:
         for el in self.page["elements"]:
             self.element(el)
         dy = 0 if self.page.get("align") == "top" else max(0.0, (CONTENT_BOTTOM - self.y) / 2)
-        parts = [self.L.step_fps(self.page.get("step_fps", 0)),
-                 f'<g transform="translate(0,{dy:.0f})">', *self.out, "</g>", *self.mout]
+        def compose(check):
+            def parts(values):
+                return [f'<g data-hold-check="warn">{s}</g>' if check and i in self.check_only[id(values)] else s
+                        for i, s in enumerate(values)]
+            return [self.L.step_fps(self.page.get("step_fps", 0)),
+                    f'<g transform="translate(0,{dy:.0f})">', *parts(self.out), "</g>", *parts(self.mout)]
+        parts = compose(False)
+        self.validation_fragment = "".join(compose(True))
         if self.progress:
             n,current,frac = self.progress[:3]
             begin = self.progress[3] if len(self.progress) > 3 else 0.0
@@ -490,7 +501,8 @@ def early_glyphs(fragment, builder):
     from pipeline.build_scene import parse_fragment
     used = {}
 
-    def walk(node, visible=0.0, until=None, windows=None):
+    def walk(node, visible=0.0, until=None, windows=None, warn=False):
+        warn = warn or node.get("data-hold-check") == "warn"
         kind = node.get('data-anim')
         delay = float(node.get('data-delay', 0))
         until = builder.end - builder.start if until is None else until
@@ -518,9 +530,12 @@ def early_glyphs(fragment, builder):
                 shown = min((max(visible, t, a) for a, z in windows if max(visible, t, a) < min(until, z)),
                             default=until)
                 if spoken is not None and t < 9000 and shown < until and builder.start + shown + 0.001 < spoken:
-                    yield ch, builder.start + shown, spoken
+                    if warn:
+                        warnings.warn(f'已审定，只提示：“{ch}”显示 {builder.start + shown:.3f}s，念到 {spoken:.3f}s')
+                    else:
+                        yield ch, builder.start + shown, spoken
         for child in node:
-            yield from walk(child, visible, until, windows)
+            yield from walk(child, visible, until, windows, warn)
 
     yield from walk(parse_fragment(fragment))
 
@@ -653,11 +668,12 @@ class Project:
         builder = PageBuilder(self.tl, page, t0, pos, self.base, page.get('progress', self.spec.get('progress')),
                               t1, self.spec.get('brands'), prepare_assets=prepare_assets)
         frag = builder.build()
-        early = list(early_glyphs(frag, builder))
+        check = builder.validation_fragment
+        early = list(early_glyphs(check, builder))
         if early:
             rows = '; '.join(f'“{ch}”显示 {shown:.3f}s，念到 {spoken:.3f}s' for ch, shown, spoken in early[:8])
             raise ValueError(f'page {i + 1}: {len(early)} 个字早于念到：{rows}')
-        found = list(unfinished(frag, t1 - t0, config.TRANSITION_SECONDS))
+        found = list(unfinished(check, t1 - t0, config.TRANSITION_SECONDS))
         for k, e, x, txt, _ in [f for f in found if f[4]]:
             warnings.warn(f"page {i + 1}（已审定，只提示）: {k} 到 {t0 + e:.2f}s 才放完、{t0 + x:.2f}s 就退场“{txt}”")
         late = [f for f in found if not f[4]]

@@ -31,7 +31,7 @@ def dashed(ctx, d, at, dur=0.5, *, color="faint", sw=6, dash="4 22", direction="
 
 
 def label(ctx, s, cue, x, y, size=84, **opts):
-    return B.text(ctx, s, x, y, size, ctx.glyphs(B.plain_of(s), cue), **opts)
+    return B.text(ctx, s, x, y, size, ctx.glyphs(B.plain_of(s), cue, summary=opts.pop("summary", False)), **opts)
 
 
 def pulse(ctx, x, y, r, at, *, amp=0.08):
@@ -130,13 +130,16 @@ def focus_network(ctx, el):
         if node.get("label"):
             dx, dy = node.get("label_offset", [0, nr + 64])
             out.append(label(ctx, node["label"], node.get("at", el["at"]), nx+dx, ny+dy,
-                             node.get("size", 74), anchor="middle", font="sans", weight=700))
+                             node.get("size", 74), anchor="middle", font="sans", weight=700,
+                             summary=node.get("summary", False)))
     hub = [B.anim("pop", t0, .5, circle(cx, cy, hr, ink))]
     if cfg.get("center"):
         cs = el.get("center_size", 70)
         if cfg.get("center_at"):     # 前面已讲过的名字：从 center_at 起直接打出
             ca = ctx.at(cfg["center_at"])
             g = [round(ca + B.TYPE_STEP * k, 4) for k in range(len(cfg["center"]))]
+            if hasattr(ctx.b, "record_glyphs"):
+                ctx.b.record_glyphs(cfg["center"], cfg["center_at"], ca, False, g, replay=True)
             hub.append(B.text(ctx, cfg["center"], cx, cy + cs * .38, cs, g, fill="#FFFFFF", anchor="middle",
                               settle=False))
         else:

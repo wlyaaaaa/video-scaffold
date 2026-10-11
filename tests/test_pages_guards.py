@@ -16,6 +16,12 @@ def timeline(text, duration=8):
 
 
 class PageGuardsTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        lease_dir = patch('pipeline.render_queue.SLOT_DIR', Path(tmp.name))
+        lease_dir.start(); self.addCleanup(lease_dir.stop)
+
     def project(self, base, tl, elements, **extra):
         spec = {'narration': [], 'pages': [{'elements': elements}], 'transition': 0, **extra}
         path = Path(base, 'table.json'); path.write_text(json.dumps(spec), encoding='utf-8')
@@ -47,6 +53,19 @@ class PageGuardsTests(unittest.TestCase):
                 p.plan()
             self.assertFalse(p.work.exists())
 
+    def test_reviewed_glyph_warning_keeps_svg_bytes_and_new_claims_wait(self):
+        el = {'claims': [{'text': '甲乙', 'at': '甲', 'mark': '乙', 'mark_at': '甲'}]}
+        tl = timeline('甲乙')
+        legacy = dict(el, hold_check='warn', preserve_svg=True)
+        boards._ids[0] = 0
+        b = pages.PageBuilder(tl, {'elements': [legacy]}, 0, 0, None)
+        before = b.build()
+        self.assertNotIn('data-hold-check', before)
+        with self.assertWarnsRegex(UserWarning, '已审定'):
+            self.assertEqual([], list(pages.early_glyphs(b.validation_fragment, b)))
+        b = pages.PageBuilder(tl, {'elements': [el]}, 0, 0, None)
+        self.assertEqual([], list(pages.early_glyphs(b.build(), b)))
+
     def test_plan_does_not_generate_background_or_decode_screen(self):
         from pipeline import board_diagrams
         with tempfile.TemporaryDirectory() as tmp, patch('v2lib.page_background', side_effect=AssertionError('write')):
@@ -60,10 +79,10 @@ class PageGuardsTests(unittest.TestCase):
     def test_final_svg_mutation_and_second_occurrence_use_real_source(self):
         b = pages.PageBuilder(timeline('甲甲'), {'elements': [{'head': '甲', 'at': '甲#2'}]}, 0, 0, None)
         frag = b.build()
-        self.assertEqual([('甲', 0.0, 1)], list(pages.early_glyphs(frag, b)))
+        self.assertEqual([], list(pages.early_glyphs(frag, b)))
         # 修改最终 SVG 仍关联同一次原文，时间不是关联键或期望值。
-        safe = frag.replace('data-delay="0"', 'data-delay="1"').replace('[0.0]', '[1.0]')
-        self.assertEqual([], list(pages.early_glyphs(safe, b)))
+        wrong = frag.replace('data-delay="1"', 'data-delay="0"').replace('[1.0]', '[0.0]')
+        self.assertEqual([('甲', 0.0, 1)], list(pages.early_glyphs(wrong, b)))
 
     def test_summary_punctuation_replay_and_parent_visibility(self):
         b = pages.PageBuilder(timeline('甲，乙'), {'elements': []}, 0, 0, None)

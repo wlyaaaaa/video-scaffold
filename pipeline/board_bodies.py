@@ -140,7 +140,7 @@ def chat(ctx, part, x, top, w, room, pad, t0):
         if s:
             g = ctx.glyphs(B.plain_of(s), it["at"])
             if it.get("text_with_bubble", part.get("text_with_bubble", False)):
-                g = [round(max(v, at), 4) for v in g]
+                g = [max(v, at) for v in g]
             body = B.text(ctx, s, bx + size * 0.7, y + bh / 2 + size * 0.36, size, g, font="sans", weight=600)
         else:
             for k in range(it.get("lines", 1)):

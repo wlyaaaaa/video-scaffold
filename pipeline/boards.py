@@ -71,6 +71,11 @@ class Ctx:
             idx = tl.text.find(core, frm)
             if idx < 0:
                 idx = tl.text.find(core, b.pos)
+            if cue and b.options.get("hold_check") != "warn":
+                anchor = self.cue_pos(cue)
+                containing = tl.text.rfind(core, max(0, anchor - len(core) + 1), anchor + len(core))
+                if containing >= 0 and containing <= anchor < containing + len(core):
+                    idx = containing
         if idx < 0:
             out, k = [], 0
             for ch in plain:
@@ -156,7 +161,7 @@ def out_at(when, inner, dur=CARD_OUT):
     return inner if when is None else anim("fade-out", when, dur, inner)
 
 
-def recolor(ctx, s, x, y, size, t0, dur, which, color, *, font="heavy", weight=900, anchor="start"):
+def recolor(ctx, s, x, y, size, t0, dur, which, color, *, font="heavy", weight=900, anchor="start", glyphs=None):
     """覆盖层：把 which（字下标集合）从左到右依次染成 color（划绿、变灰都用它）。"""
     plain = plain_of(s)
     idx = [i for i in range(len(plain)) if i in which]
@@ -164,6 +169,8 @@ def recolor(ctx, s, x, y, size, t0, dur, which, color, *, font="heavy", weight=9
     times = [9999.0] * len(plain)
     for k, i in enumerate(idx):
         times[i] = round(t0 + dur * k / n, 4)
+        if glyphs is not None and ctx.b.options.get("hold_check") != "warn":
+            times[i] = max(times[i], glyphs[i])
     roles = [(ch, None) for ch in plain]
     return text(ctx, plain, x, y, size, times, font=font, weight=weight, fill=color, anchor=anchor,
                 settle=False, roles=roles, fade=0.16)
@@ -258,10 +265,10 @@ def claims(ctx, el):
             layers.append(out_at(strike_t, band, 0.25))
         layers.append(text(ctx, shown, 0, 0, size, g, tid=tid, roles=roles))
         if mark:
-            layers.append(recolor(ctx, shown, 0, 0, size, mt, md, set(range(c0, c0 + len(mark))), "accent"))
+            layers.append(recolor(ctx, shown, 0, 0, size, mt, md, set(range(c0, c0 + len(mark))), "accent", glyphs=g))
         if strike_t is not None:
             sd = it.get("strike_dur", 0.45)
-            layers.append(recolor(ctx, shown, 0, 0, size, strike_t, sd, set(range(len(shown))), "muted"))
+            layers.append(recolor(ctx, shown, 0, 0, size, strike_t, sd, set(range(len(shown))), "muted", glyphs=g))
             layers.append(mark_rect(tid, 0, len(shown), strike_t, sd, muted, "strike", 1.0, pad=0.04))
         # 进场后何时退到上面那一摞：下一句开始前，或者被划掉的时刻
         nxt = starts[i + 1][3][0] if i + 1 < len(starts) else None
