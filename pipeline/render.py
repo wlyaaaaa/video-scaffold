@@ -55,6 +55,11 @@ RENDER_IDENTITY = "_render_identity.json"
 FILE_URI = re.compile(r"""file:///[^\s"'<>)]*""", re.IGNORECASE)
 
 
+def capture_size():
+    scale = getattr(config, "PAGE_CAPTURE_SCALE", 1.0)
+    return round(config.WIDTH * scale), round(config.HEIGHT * scale)
+
+
 def _scene_file_resources(scene_html_paths):
     from pipeline.resources import inventory
 
@@ -74,7 +79,8 @@ def _render_identity_record(scene_html_paths, durations, chunk_frames, total_fra
         ],
         "file_resources": _scene_file_resources(scene_html_paths),
         "background_sha256": sha256_file(config.BG_VIDEO),
-        "canvas": {"width": config.WIDTH, "height": config.HEIGHT, "fps": config.FPS},
+        "canvas": {"width": config.WIDTH, "height": config.HEIGHT, "fps": config.FPS,
+                   "capture": capture_size()},
         "frames": {
             "total": total_frames,
             "chunk": chunk_frames,
@@ -272,13 +278,15 @@ def _envelope_at(scene, t):
 
 def _chunk_cmd(bg_offset, chunk_dur, chunk_out):
     still = _bg_is_still()
+    width, height = capture_size()
     if still:
         # cover-fit the still page to the canvas; it never moves, so no offset
-        bg = (f"[0:v]scale={config.WIDTH}:{config.HEIGHT}:force_original_aspect_ratio=increase,"
-              f"crop={config.WIDTH}:{config.HEIGHT},setsar=1[bg]")
+        bg = (f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+              f"crop={width}:{height},setsar=1[bg]")
         background_input = ["-loop", "1", "-framerate", str(config.FPS), "-i", config.BG_VIDEO]
     else:
-        bg = f"[0:v]trim=start={bg_offset:.3f},setpts=PTS-STARTPTS[bg]"
+        resize = f",scale={width}:{height}" if (width, height) != (config.WIDTH, config.HEIGHT) else ""
+        bg = f"[0:v]trim=start={bg_offset:.3f},setpts=PTS-STARTPTS{resize}[bg]"
         background_input = ["-stream_loop", "-1", "-i", config.BG_VIDEO]
     vfilter = f"{bg}; [bg][1:v]overlay=0:0:shortest=1"
     if config.CINEMATIC:
@@ -350,9 +358,8 @@ async def _worker_loop(
             )
         except Exception:
             browser = await p.chromium.launch(headless=True)
-        ctx = await browser.new_context(
-            viewport={"width": config.WIDTH, "height": config.HEIGHT}
-        )
+        width, height = capture_size()
+        ctx = await browser.new_context(viewport={"width": width, "height": height})
 
         # LRU of warm pages: cap memory at MAX_PAGES per worker instead of one
         # page per scene (the all-scenes preload was the OOM driver).
@@ -369,6 +376,8 @@ async def _worker_loop(
             from pipeline.browser_runtime import ready
 
             await ready(page)
+            if width != config.WIDTH:
+                await page.evaluate("scale => document.documentElement.style.zoom = scale", width / config.WIDTH)
             if errors:
                 raise RuntimeError("scene JavaScript error: " + errors[0])
             cdp = None

@@ -23,6 +23,7 @@ import sys
 import warnings
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -593,6 +594,23 @@ def plan_pages(spec, tl):
 
 
 # ---- 出片 --------------------------------------------------------------------------------------
+def queued(method):
+    @wraps(method)
+    def run(self, *args, **kwargs):
+        from pipeline import render_queue
+        height = self.spec.get("render_height", 2160)
+        if height not in (1080, 2160):
+            raise ValueError("render_height must be 1080 or 2160")
+        with render_queue.lease(str(self.spec_path)):
+            previous = getattr(config, "PAGE_CAPTURE_SCALE", 1.0)
+            config.PAGE_CAPTURE_SCALE = height / 2160
+            try:
+                return method(self, *args, **kwargs)
+            finally:
+                config.PAGE_CAPTURE_SCALE = previous
+    return run
+
+
 class Project:
     def __init__(self, spec_path):
         self.spec_path = Path(spec_path).resolve()
@@ -659,22 +677,28 @@ class Project:
                                        round(t0 + d, 2)] for el, d in b.marks]})
         return {"duration": round(self.tl.duration, 3), "pages": rows}
 
+    @queued
     def stills(self, times=None):
+        from pipeline import render
         from playwright.sync_api import sync_playwright
         from PIL import Image
         scenes, durs = self.scenes()
-        bg = Image.open(config.BG_VIDEO).convert("RGBA").resize((config.WIDTH, config.HEIGHT))
+        width, height = render.capture_size()
+        bg = Image.open(config.BG_VIDEO).convert("RGBA").resize((width, height))
         times = times or [t0 + (t1 - t0) - 0.05 for t0, t1, _ in self.pages]
         bounds = [t0 for t0, _, _ in self.pages]
         shots = []
         with sync_playwright() as p:
             b = p.chromium.launch(headless=True,channel="chrome")
-            pg = b.new_page(viewport={"width": config.WIDTH, "height": config.HEIGHT})
+            pg = b.new_page(viewport={"width": width, "height": height})
             for t in times:
                 i = max(k for k, s in enumerate(bounds) if s <= t)
                 pg.goto(Path(scenes[i]).as_uri()); pg.wait_for_load_state("networkidle")
                 pg.evaluate("document.fonts.ready")
-                pg.evaluate(f"window.seekTime({t - bounds[i]})")
+                pg.evaluate("scale => document.documentElement.style.zoom=scale", width / config.WIDTH)
+                op, transform = render._envelope_at({"start": self.pages[i][0], "end": self.pages[i][1]}, t)
+                pg.evaluate("([t,op,tr]) => {window.seekTime(t);document.body.style.opacity=op;"
+                            "document.body.style.transform=tr}", [t - bounds[i], op, transform])
                 png = self.work / f"still_{t:06.2f}.png"
                 pg.screenshot(path=str(png), omit_background=True)
                 im = bg.copy(); im.alpha_composite(Image.open(png).convert("RGBA"))
@@ -699,13 +723,14 @@ class Project:
                         "-map", "[out]", str(wav)], check=True)
         return wav
 
+    @queued
     def render(self):
-        from pipeline import lint, render, subtitles
+        from pipeline import lint, render, render_queue, subtitles
         scenes, durs = self.scenes()
         if lint.lint(scenes, durs):
             raise SystemExit("layout lint found HARD overflow")
         track = self.work / "output" / "video_track.mp4"
-        render.render_timeline(scenes, durs, out_path=str(track))
+        render.render_timeline(scenes, durs, out_path=str(track), num_workers=render_queue.auto_workers())
         wav = self.audio()
         ass = self.work / "subtitles.ass"
         ass.write_text(subtitles.karaoke_ass(self.tl.text, self.tl.words, duration=self.tl.duration,reveal=True),
