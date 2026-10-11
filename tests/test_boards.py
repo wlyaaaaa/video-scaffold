@@ -128,3 +128,52 @@ class HoldCheckTests(unittest.TestCase):
             {"cards": [{"at": "Codex", "title": "Codex", "icon": "laptop"}]}]}
         frag = pages.PageBuilder(tl, page, 0.0, 0, None).build()
         parse_fragment(frag)
+
+
+class Seg06BodyTests(unittest.TestCase):
+    """终端真字、开关拨动、截图多个强调框、卡片行划线，以及本页之后才念到的名字按概括字样打出。"""
+
+    def setUp(self):
+        self.tl = _timeline()
+
+    def build(self, elements, end=None):
+        return pages.PageBuilder(self.tl, {"elements": elements}, 0.0, 0, None, end=end).build()
+
+    def test_terminal_rows_toggle_and_tile_strike_finish(self):
+        frag = self.build([
+            {"cards": [{"at": "网上", "title": "天天用", "body": [
+                {"kind": "terminal", "at": "天天", "rows": [{"text": "run check", "prompt": True},
+                                                          {"text": "status=pass", "at": "常常", "color": "#7FD8B0"}]},
+                {"kind": "toggle", "at": "网上", "off_at": "气到", "label": "记忆"}]}]},
+            {"tiles": [{"title": "天天用", "at": "天天", "lines": [{"text": "离谱", "at": "离谱", "strike_at": "可我"}]}]}])
+        root = parse_fragment(frag)
+        texts = ["".join(e.itertext()) for e in root.iter() if e.get("data-glyph-times")]
+        self.assertIn("› run check", texts)
+        self.assertIn("status=pass", texts)
+        self.assertTrue(any(e.get("data-mode") == "strike" for e in root.iter()))
+        keys = [json.loads(e.get("data-keys")) for e in root.iter() if e.get("data-keys")]
+        self.assertTrue(any(k[-1][1] < 0 for k in keys))          # 圆钮滑到左边
+        self.assertEqual([], list(pages.unfinished(frag, self.tl.duration)))
+
+    def test_screenshot_focus_boxes_follow_their_own_cues(self):
+        import tempfile
+        from pathlib import Path
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "panel.png"
+            Image.new("RGB", (100, 20), "white").save(src)
+            b = pages.PageBuilder(self.tl, {"elements": [{"screenshot": src.name, "at": "网上",
+                "focus": [[0, 0, .5, 1, "天天"], [.5, 0, .5, 1, "气到"]]}]}, 0.0, 0, Path(tmp))
+            root = parse_fragment(b.build())
+            delays = sorted(float(e.get("data-delay")) for e in root.iter()
+                            if e.tag.endswith("rect") and e.get("data-anim") == "draw")
+            want = [self.tl.char_time(TEXT.find("天天")), self.tl.char_time(TEXT.find("气到"))]
+            for got, exp in zip(delays, want):
+                self.assertAlmostEqual(got, exp, places=3)
+
+    def test_name_spoken_only_after_this_page_types_from_its_cue(self):
+        end = self.tl.char_time(TEXT.find("光")) - 0.1      # 本页在“Claude”被念到之前结束
+        frag = self.build([{"focus_network": {"nodes": [{"label": "Claude", "at": "天天"}]}, "at": "网上"}], end=end)
+        root = parse_fragment(frag)
+        el = next(e for e in root.iter() if e.get("data-glyph-times") and "".join(e.itertext()) == "Claude")
+        self.assertLess(max(json.loads(el.get("data-glyph-times"))), end)
