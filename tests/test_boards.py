@@ -128,3 +128,34 @@ class HoldCheckTests(unittest.TestCase):
             {"cards": [{"at": "Codex", "title": "Codex", "icon": "laptop"}]}]}
         frag = pages.PageBuilder(tl, page, 0.0, 0, None).build()
         parse_fragment(frag)
+
+
+class DecisionBodyTests(unittest.TestCase):
+    """选择题、输入框、按钮、菜单和网格圈出：能出片段，点选/按下落在绑定的词上。"""
+
+    def setUp(self):
+        self.tl = _timeline()
+
+    def _build(self, body, grid=None):
+        page = {"elements": [{"deck": [{"at": "网上", "label": "汇报网页", "body": body}]}]}
+        return pages.PageBuilder(self.tl, page, 0.0, 0, None).build()
+
+    def test_choice_field_button_menu_build(self):
+        frag = self._build([
+            {"kind": "choice", "question": "第 1 题", "question_at": "难题",
+             "options": [{"text": "做法一", "at": "可我", "sub_bar": "天天"}, {"text": "做法二"}],
+             "rec": 1, "rec_at": "常常", "pick": 1, "pick_at": "气到", "media": [{"type": "video", "at": "光"}]},
+            {"kind": "field", "label": "我的说明", "at": "天天", "text_at": "常常"},
+            {"kind": "button", "text": "生成我的答复", "at": "Claude", "press_at": "烧了"},
+            {"kind": "menu", "items": [{"header": "本地"}, "一号", "二号"], "picks": [[1, "Codex"], [2, "累计"]]},
+            {"kind": "grid", "n": 6, "at": "天天", "ring": [1, 4], "ring_at": "气到", "dim": [0, 2], "dim_at": "光"},
+        ])
+        root = parse_fragment(frag)
+        kinds = {e.get("data-anim") for e in root.iter() if e.get("data-anim")}
+        self.assertTrue({"keys", "shockwave", "draw", "wipe", "pulse"} <= kinds)
+        clicks = sorted(float(e.get("data-delay")) for e in root.iter() if e.get("data-anim") == "shockwave")
+        self.assertAlmostEqual(clicks[0], self.tl.char_time(TEXT.find("气到")) + 0.05, places=3)
+
+    def test_menu_pick_on_header_fails(self):
+        with self.assertRaises(ValueError):
+            self._build([{"kind": "menu", "items": [{"header": "本地"}, "一号"], "picks": [[0, "天天"]]}])

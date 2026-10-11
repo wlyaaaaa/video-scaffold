@@ -524,6 +524,10 @@ def body_part(ctx, part, x, top, w, room, pad, t0, cid):
         flip_at = ctx.at(part["flip_at"]) if part.get("flip_at") else None
         cells = []
         order = sorted(flips)
+        rings = list(part.get("ring", []))
+        ring_at = ctx.at(part["ring_at"]) if part.get("ring_at") else None
+        dims = set(part.get("dim", []))
+        dim_at = ctx.at(part["dim_at"]) if part.get("dim_at") else None
         gx = x + pad + ((w - 2 * pad - cols * cell - (cols - 1) * gap) / 2 if part.get("center") else 0)
         for k in range(n):
             cx_ = gx + (k % cols) * (cell + gap)
@@ -536,7 +540,15 @@ def body_part(ctx, part, x, top, w, room, pad, t0, cid):
                        f'<path d="M{_r(cx_ + s * 0.12)},{_r(cy_ + s * 0.8)} L{_r(cx_ + s * 0.38)},{_r(cy_ + s * 0.45)} '
                        f'L{_r(cx_ + s * 0.55)},{_r(cy_ + s * 0.66)} L{_r(cx_ + s * 0.68)},{_r(cy_ + s * 0.52)} '
                        f'L{_r(cx_ + s * 0.88)},{_r(cy_ + s * 0.8)} Z" fill="{a}" fill-opacity="0.75"/>')
-            cells.append(anim("pop", on + k * part.get("step", 0.018), 0.3, sq))
+            cell_svg = anim("pop", on + k * part.get("step", 0.018), 0.3, sq)
+            if k in dims and dim_at is not None:     # 到点变淡（例如被筛掉的那几张）
+                cell_svg = keys([[0, 0, 0, 1, 1], [dim_at, 0, 0, 1, 1], [dim_at + 0.35, 0, 0, 1, 0.22]], cell_svg)
+            cells.append(cell_svg)
+            if k in rings and ring_at is not None:   # 到点圈出（例如抽出来让人核对的几张）
+                rk = ring_at + rings.index(k) * part.get("ring_step", 0.12)
+                cells.append(f'<rect data-anim="draw" data-delay="{_r(rk)}" data-dur="0.35" x="{_r(cx_ - 9)}" '
+                             f'y="{_r(cy_ - 9)}" width="{_r(cell + 18)}" height="{_r(cell + 18)}" rx="16" fill="none" '
+                             f'stroke="{a}" stroke-width="8"/>')
             if k in flips and flip_at is not None:
                 dk = flip_at + order.index(k) * part.get("flip_step", 0.07)
                 ins = cell * 0.2
@@ -739,8 +751,9 @@ def tally(ctx, el):
             nx = x + lw + bw + 50
             ny = ry + bh * 0.5 + nsize * 0.36
             nid = _id("num")
+            comma = ' data-comma="1"' if r.get("comma") else ""
             num = (f'<text id="{nid}" data-anim="count" data-delay="{_r(t)}" data-dur="{_r(dur)}" data-to="{v}" '
-                   f'data-decimals="{dec}" x="{_r(nx)}" y="{_r(ny)}" font-family="{esc(ctx.font("heavy"))}" '
+                   f'data-decimals="{dec}"{comma} x="{_r(nx)}" y="{_r(ny)}" font-family="{esc(ctx.font("heavy"))}" '
                    f'font-size="{nsize}" font-weight="900" fill="{color}">0</text>')
             if r.get("unit"):
                 ut = ctx.glyphs(r["unit"], r.get("unit_at"), start=None if r.get("unit_at") else t + dur)

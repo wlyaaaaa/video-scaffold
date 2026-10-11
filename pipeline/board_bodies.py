@@ -65,7 +65,9 @@ def chat(ctx, part, x, top, w, room, pad, t0):
         fill = "#E6F4EF" if user else "#FFFFFF"
         parts.append(f'<rect x="{_r(bx)}" y="{_r(y)}" width="{_r(bw)}" height="{_r(bh)}" rx="{_r(bh / 2)}" '
                      f'fill="{fill}" stroke="{rule if not user else fill}" stroke-width="3"/>')
-        if not user:
+        if not user and it.get("logo"):     # AI 一方有标志时换成标志（写法同其他 logo 位置）
+            parts.append(B.brand_mark(ctx, it["logo"], x + pad + 46, y + bh / 2, 48))
+        elif not user:
             parts.append(f'<circle cx="{_r(x + pad + 46)}" cy="{_r(y + bh / 2)}" r="44" fill="{ink}"/>'
                          f'<text x="{_r(x + pad + 46)}" y="{_r(y + bh / 2 + 15)}" text-anchor="middle" '
                          f'font-family="{B.esc(ctx.font("mono"))}" font-size="40" font-weight="700" fill="#FFFFFF">AI</text>')
@@ -573,9 +575,253 @@ def level(ctx, part, x, top, w, room, pad, t0):
     return "".join(out), bh + 220
 
 
+# ---- 鼠标：从右下滑到目标点、点一下（一圈涟漪）；选择题、按钮共用 -------------------------------------------
+def _cursor(ctx, tx, ty, at, size=86):
+    """箭头在 at 之前 0.35 秒从右下滑入，at 时刻落在 (tx, ty) 并点一下；之后停在原处。"""
+    s = size
+    arrow = (f'<path d="M0,0 L0,{_r(s)} L{_r(s * 0.27)},{_r(s * 0.74)} L{_r(s * 0.47)},{_r(s * 1.12)} '
+             f'L{_r(s * 0.62)},{_r(s * 1.05)} L{_r(s * 0.43)},{_r(s * 0.68)} L{_r(s * 0.78)},{_r(s * 0.68)} Z" '
+             f'fill="{ctx.col("ink")}" stroke="#FFFFFF" stroke-width="7" stroke-linejoin="round"/>')
+    t0 = max(0.0, at - 0.35)
+    track = [[0, 220, 170, 1, 0], [t0, 220, 170, 1, 0], [t0 + 0.08, 200, 150, 1, 1], [at, 0, 0, 1, 1],
+             [at + 0.08, 0, 0, 0.9, 1], [at + 0.18, 0, 0, 1, 1]]
+    ripple = (f'<g transform="translate({_r(tx)},{_r(ty)})"><circle data-anim="shockwave" data-delay="{_r(at + 0.05)}" '
+              f'data-dur="0.5" data-max="2.6" r="34" fill="none" stroke="{ctx.col("accent")}" stroke-width="7"/></g>')
+    return ripple + f'<g transform="translate({_r(tx)},{_r(ty)})">{B.keys(track, arrow)}</g>'
+
+
+def _pill(ctx, label, x, y, fs, fill, color="#FFFFFF"):
+    pw, ph = ctx.width(label, fs) + 56, fs * 1.6
+    return (f'<rect x="{_r(x - pw)}" y="{_r(y - ph / 2)}" width="{_r(pw)}" height="{_r(ph)}" rx="{_r(ph / 2)}" '
+            f'fill="{fill}"/><text x="{_r(x - pw / 2)}" y="{_r(y + fs * 0.36)}" text-anchor="middle" '
+            f'font-family="{B.esc(ctx.font("sans"))}" font-size="{fs}" font-weight="800" fill="{color}">{B.esc(label)}</text>')
+
+
+def _thumb(ctx, m, mx, my, mw, mh):
+    """题里放的实物：图片（照片或小山占位）、视频（加播放键）。"""
+    a, rule = ctx.col("accent"), ctx.col("rule")
+    clip = B._id("mc")
+    body = [f'<rect x="{_r(mx)}" y="{_r(my)}" width="{_r(mw)}" height="{_r(mh)}" rx="18" fill="{a}" '
+            f'fill-opacity="0.16" stroke="{rule}" stroke-width="3"/>']
+    if m.get("photo"):
+        from pipeline.pages import _resolve
+        img = ctx.L.FU(str(_resolve(ctx.b.base, m["photo"])))
+        body.append(f'<defs><clipPath id="{clip}"><rect x="{_r(mx)}" y="{_r(my)}" width="{_r(mw)}" height="{_r(mh)}" '
+                    f'rx="18"/></clipPath></defs><image href="{img}" x="{_r(mx)}" y="{_r(my)}" width="{_r(mw)}" '
+                    f'height="{_r(mh)}" clip-path="url(#{clip})" preserveAspectRatio="xMidYMid slice"/>')
+    else:
+        s = min(mw, mh)
+        cx_, cy_ = mx + (mw - s) / 2, my + (mh - s) / 2
+        body.append(f'<circle cx="{_r(cx_ + s * 0.7)}" cy="{_r(cy_ + s * 0.3)}" r="{_r(s * 0.09)}" fill="#FFFFFF"/>'
+                    f'<path d="M{_r(cx_ + s * 0.1)},{_r(cy_ + s * 0.82)} L{_r(cx_ + s * 0.38)},{_r(cy_ + s * 0.45)} '
+                    f'L{_r(cx_ + s * 0.55)},{_r(cy_ + s * 0.66)} L{_r(cx_ + s * 0.68)},{_r(cy_ + s * 0.52)} '
+                    f'L{_r(cx_ + s * 0.9)},{_r(cy_ + s * 0.82)} Z" fill="{a}" fill-opacity="0.75"/>')
+    if m.get("type") == "video":
+        cx_, cy_, r_ = mx + mw / 2, my + mh / 2, mh * 0.2
+        body.append(f'<circle cx="{_r(cx_)}" cy="{_r(cy_)}" r="{_r(r_)}" fill="{ctx.col("ink")}" fill-opacity="0.78"/>'
+                    f'<path d="M{_r(cx_ - r_ * 0.3)},{_r(cy_ - r_ * 0.45)} L{_r(cx_ + r_ * 0.5)},{_r(cy_)} '
+                    f'L{_r(cx_ - r_ * 0.3)},{_r(cy_ + r_ * 0.45)} Z" fill="#FFFFFF"/>')
+    return "".join(body)
+
+
+# ---- 选择题：题干、几个做法（各带一行后果）、推荐标签、点选；题里可放图片/视频 --------------------------------
+def choice(ctx, part, x, top, w, room, pad, t0):
+    a, rule = ctx.col("accent"), ctx.col("rule")
+    size = part.get("size", 64)
+    opts = part["options"]
+    x0, iw = x + pad, w - 2 * pad
+    out, y = [], top
+    if part.get("question"):
+        qa = part.get("question_at")
+        g = ctx.glyphs(B.plain_of(part["question"]), qa, start=None if qa else t0 + 0.15)
+        qs = round(size * 1.15)
+        y += qs
+        out.append(B.text(ctx, part["question"], x0, y, qs, g, font="sans", weight=800))
+        y += size * 0.6
+    has_sub = any(o.get("sub") or o.get("sub_bar") for o in opts)
+    rh = part.get("row_h", size * (2.5 if has_sub else 1.8))
+    gap = part.get("gap", 22)
+    rec, rec_at = part.get("rec"), _t(ctx, part, "rec_at", None)
+    pick, pick_at = part.get("pick"), _t(ctx, part, "pick_at", None)
+    letters = part.get("letters", "ABCDEF")
+    for k, o in enumerate(opts):
+        ry = y + k * (rh + gap)
+        at = ctx.at(o["at"]) if o.get("at") else t0 + 0.2 + 0.1 * k
+        rcx, rcy = x0 + 30 + size * 0.42, ry + rh / 2
+        row = [f'<rect x="{_r(x0)}" y="{_r(ry)}" width="{_r(iw)}" height="{_r(rh)}" rx="22" fill="#FFFFFF" '
+               f'stroke="{rule}" stroke-width="3"/>',
+               f'<circle cx="{_r(rcx)}" cy="{_r(rcy)}" r="{_r(size * 0.38)}" fill="#FFFFFF" '
+               f'stroke="{ctx.col("faint")}" stroke-width="6"/>']
+        tx = rcx + size * 0.9
+        label = (f"{letters[k]}  " if letters else "") + o.get("text", "")
+        ty = ry + (rh * 0.42 if has_sub else rh / 2) + size * 0.36
+        g = ctx.glyphs(label, o.get("at"), start=None if o.get("at") else at)
+        row.append(B.text(ctx, label, tx, ty, size, g, font="sans", weight=700))
+        if o.get("sub"):
+            sa = o.get("sub_at")
+            sg = ctx.glyphs(o["sub"], sa, start=None if sa else at + 0.2)
+            row.append(B.text(ctx, o["sub"], tx, ty + size * 0.95, round(size * 0.72), sg, font="sans", weight=500,
+                              fill="muted", settle=False))
+        elif o.get("sub_bar"):
+            st = ctx.at(o["sub_bar"]) + 0.08 * k
+            bw = (x0 + iw - tx - 260) * o.get("w", 0.7)
+            row.append(f'<rect data-anim="wipe" data-dir="left" data-delay="{_r(st)}" data-dur="0.35" '
+                       f'x="{_r(tx)}" y="{_r(ty + size * 0.42)}" width="{_r(bw)}" height="{_r(size * 0.3)}" '
+                       f'rx="{_r(size * 0.15)}" fill="{ctx.col("faint")}" fill-opacity="0.8"/>')
+        out.append(B.anim("fade-up", at, 0.35, "".join(row), ' data-shift="30"'))
+        if k == rec and rec_at is not None:
+            out.append(f'<rect data-anim="draw" data-delay="{_r(rec_at)}" data-dur="0.45" x="{_r(x0)}" y="{_r(ry)}" '
+                       f'width="{_r(iw)}" height="{_r(rh)}" rx="22" fill="none" stroke="{a}" stroke-width="7"/>')
+            out.append(B.anim("pop", rec_at + 0.15, 0.4, _pill(ctx, part.get("rec_label", "推荐"), x0 + iw - 30,
+                                                                ry + rh / 2, round(size * 0.78), a)))
+        if k == pick and pick_at is not None:
+            dot = (f'<circle cx="{_r(rcx)}" cy="{_r(rcy)}" r="{_r(size * 0.38)}" fill="#FFFFFF" stroke="{a}" '
+                   f'stroke-width="6"/><circle cx="{_r(rcx)}" cy="{_r(rcy)}" r="{_r(size * 0.2)}" fill="{a}"/>')
+            out.append(B.anim("pop", pick_at + 0.05, 0.3, dot))
+            out.append(_cursor(ctx, rcx + size * 0.1, rcy + size * 0.1, pick_at))
+    y += len(opts) * (rh + gap)
+    if part.get("reason"):
+        ra = part.get("reason_at")
+        g = ctx.glyphs(B.plain_of(part["reason"]), ra, start=None if ra else (rec_at or t0) + 0.3)
+        y += size * 0.9
+        out.append(B.text(ctx, part["reason"], x0 + 10, y, round(size * 0.82), g, font="sans", weight=700,
+                          fill="accent", settle=False))
+        y += size * 0.5
+    media = part.get("media") or []
+    if media:
+        mh = part.get("media_h", 230)
+        mw = mh * 1.45
+        y += 20
+        for k, m in enumerate(media):
+            mx = x0 + k * (mw + 30)
+            out.append(B.anim("pop", ctx.at(m["at"]), 0.4, _thumb(ctx, m, mx, y, mw, mh)))
+        y += mh + 30
+    return "".join(out), y - top + 20
+
+
+# ---- 输入框：留一个框，到点写进说明（逐字或占位横线），末尾光标闪动 ---------------------------------------------
+def field(ctx, part, x, top, w, room, pad, t0):
+    a, rule = ctx.col("accent"), ctx.col("rule")
+    size = part.get("size", 60)
+    h = part.get("h", size * 3.0)
+    x0, iw = x + pad, w - 2 * pad
+    at = _t(ctx, part, "at", t0 + 0.2)
+    out = []
+    y = top + 10
+    if part.get("label"):
+        la = part.get("label_at")
+        g = ctx.glyphs(part["label"], la, start=None if la else at)
+        out.append(B.text(ctx, part["label"], x0, top + size * 0.8, round(size * 0.82), g, font="mono", weight=700,
+                          fill="muted", ls=3, settle=False))
+        y = top + size * 1.3
+    out.append(B.anim("fade", at, 0.3, f'<rect x="{_r(x0)}" y="{_r(y)}" width="{_r(iw)}" height="{_r(h)}" rx="20" '
+                                        f'fill="#FFFFFF" stroke="{rule}" stroke-width="4"/>'))
+    out.append(f'<rect data-anim="draw" data-delay="{_r(at + 0.1)}" data-dur="0.5" x="{_r(x0)}" y="{_r(y)}" '
+               f'width="{_r(iw)}" height="{_r(h)}" rx="20" fill="none" stroke="{a}" stroke-width="6"/>')
+    ta = _t(ctx, part, "text_at", None)
+    if part.get("text"):
+        g = ctx.glyphs(B.plain_of(part["text"]), part.get("text_at"), start=None if ta is not None else at + 0.4)
+        base = y + h / 2 + size * 0.36
+        out.append(B.text(ctx, part["text"], x0 + 40, base, size, g, font="sans", weight=600, settle=False))
+        cx, cy = x0 + 52 + ctx.width(B.plain_of(part["text"]), size), base - size * 0.82
+        caret_at = max(g) + 0.15
+    else:
+        ws = part.get("widths", [0.78, 0.46])
+        start = ta if ta is not None else at + 0.4
+        lh = size * 0.42
+        y1 = y + h / 2 - (len(ws) * lh + (len(ws) - 1) * lh * 1.1) / 2
+        for k, wf in enumerate(ws):
+            out.append(f'<rect data-anim="wipe" data-dir="left" data-delay="{_r(start + 0.3 * k)}" data-dur="0.3" '
+                       f'x="{_r(x0 + 40)}" y="{_r(y1 + k * lh * 2.1)}" width="{_r((iw - 80) * wf)}" height="{_r(lh)}" '
+                       f'rx="{_r(lh / 2)}" fill="{ctx.col("block")}"/>')
+        cx = x0 + 54 + (iw - 80) * ws[-1]
+        cy = y1 + (len(ws) - 1) * lh * 2.1 - lh * 0.5
+        caret_at = start + 0.3 * len(ws)
+    out.append(f'<g data-anim="pulse" data-delay="{_r(caret_at)}" data-dur="0.2" data-amp="0" data-spd="9" '
+               f'data-opmin="0"><rect x="{_r(cx)}" y="{_r(cy)}" width="8" height="{_r(size * 1.0)}" fill="{a}"/></g>')
+    return "".join(out), (y - top) + h + 40
+
+
+# ---- 按钮：到点出现；鼠标点下去，按钮变实绿、轻轻一缩；之后可在旁边打出一句结果 --------------------------------
+def button(ctx, part, x, top, w, room, pad, t0):
+    a = ctx.col("accent")
+    size = part.get("size", 66)
+    label = part["text"]
+    at = _t(ctx, part, "at", t0 + 0.2)
+    bw, bh = ctx.width(label, size) + size * 1.6, size * 2.0
+    bx = x + pad if part.get("align", "left") == "left" else x + (w - bw) / 2
+    by = top + 20
+    cue = part.get("text_at")
+    g = ctx.glyphs(label, cue, start=None if cue else at + 0.1)
+    face = (f'<rect x="{_r(bx)}" y="{_r(by)}" width="{_r(bw)}" height="{_r(bh)}" rx="{_r(bh / 2)}" fill="#FFFFFF" '
+            f'stroke="{a}" stroke-width="7"/>')
+    out = [B.anim("pop", at, 0.4, face), B.text(ctx, label, bx + bw / 2, by + bh / 2 + size * 0.36, size, g,
+                                                    font="sans", weight=800, fill="accent", anchor="middle", settle=False)]
+    if part.get("press_at"):
+        pt = ctx.at(part["press_at"])
+        pressed = (f'<rect x="{_r(bx)}" y="{_r(by)}" width="{_r(bw)}" height="{_r(bh)}" rx="{_r(bh / 2)}" fill="{a}"/>'
+                   f'<text x="{_r(bx + bw / 2)}" y="{_r(by + bh / 2 + size * 0.36)}" text-anchor="middle" '
+                   f'font-family="{B.esc(ctx.font("sans"))}" font-size="{size}" font-weight="800" fill="#FFFFFF">'
+                   f'{B.esc(label)}</text>')
+        out.append(B.keys([[0, 0, 0, 1, 0], [pt, 0, 0, 1, 0], [pt + 0.06, 0, 0, 1, 1],
+                           [pt + 0.14, bw * 0.02, bh * 0.03, 0.96, 1], [pt + 0.3, 0, 0, 1, 1]], pressed))
+        out.append(_cursor(ctx, bx + bw * 0.72, by + bh * 0.6, pt))
+        if part.get("done"):
+            da = part.get("done_at")
+            g = ctx.glyphs(part["done"], da, start=None if da else pt + 0.35)
+            out.append(B.text(ctx, part["done"], bx + bw + 60, by + bh / 2 + size * 0.3, round(size * 0.8), g,
+                              font="mono", weight=700, fill="accent", settle=False))
+    return "".join(out), bh + 60
+
+
+# ---- 下拉菜单：一列选项（可带分组小标题），高亮条按念到在几项之间移动 ----------------------------------------
+def menu(ctx, part, x, top, w, room, pad, t0):
+    a, rule = ctx.col("accent"), ctx.col("rule")
+    size = part.get("size", 64)
+    rh = part.get("row_h", size * 1.7)
+    x0, iw = x + pad, w - 2 * pad
+    at = _t(ctx, part, "at", t0 + 0.2)
+    rows, ys, y = [], [], top + 14
+    for k, it in enumerate(part["items"]):
+        it = {"text": it} if isinstance(it, str) else it
+        ra = ctx.at(it["at"]) if it.get("at") else at + 0.05 * k
+        if it.get("header"):
+            g = ctx.glyphs(it["header"], it.get("at"), start=None if it.get("at") else ra)
+            rows.append(B.text(ctx, it["header"], x0 + 40, y + size * 0.9, round(size * 0.72), g, font="mono",
+                               weight=700, fill="muted", ls=3, settle=False))
+            y += size * 1.3
+            ys.append(None)
+            continue
+        g = ctx.glyphs(B.plain_of(it["text"]), it.get("at"), start=None if it.get("at") else ra)
+        rows.append(B.text(ctx, it["text"], x0 + 60, y + rh / 2 + size * 0.36, size, g, font="sans", weight=600,
+                           settle=False))
+        ys.append(y)
+        y += rh
+    frame = (f'<rect x="{_r(x0)}" y="{_r(top)}" width="{_r(iw)}" height="{_r(y - top + 14)}" rx="24" fill="#FFFFFF" '
+             f'stroke="{rule}" stroke-width="3"/>')
+    out = [B.anim("fade-up", at, 0.35, frame, ' data-shift="30"')]
+    picks = part.get("picks", [])
+    if picks:
+        track = []
+        for idx, cue in picks:
+            pt, yy = ctx.at(cue), ys[idx]
+            if yy is None:
+                raise ValueError(f"menu pick {idx} is a header row")
+            if not track:
+                track += [[0, 0, yy, 1, 0], [pt, 0, yy, 1, 0], [pt + 0.2, 0, yy, 1, 1]]
+            else:
+                track += [[pt, 0, track[-1][2], 1, 1], [pt + 0.3, 0, yy, 1, 1]]
+        hl = (f'<rect x="{_r(x0 + 10)}" y="0" width="{_r(iw - 20)}" height="{_r(rh)}" rx="18" fill="{a}" '
+              f'fill-opacity="0.14"/><rect x="{_r(x0 + 22)}" y="{_r(rh * 0.2)}" width="10" height="{_r(rh * 0.6)}" '
+              f'rx="5" fill="{a}"/>')
+        out.append(B.keys(track, hl))
+    out += rows
+    return "".join(out), y - top + 40
+
+
 BODIES = {"terminal": terminal, "chat": chat, "dial": dial, "scan": scan, "gauges": gauges, "ring": ring,
           "bar": bar, "flow": flow, "context_stack": context_stack, "inspect": inspect, "todo": todo,
-          "level": level}
+          "level": level, "choice": choice, "field": field, "button": button, "menu": menu}
 
 
 # ---- 一排并列卡片（各自到点升起、一直留着） -------------------------------------------------------
