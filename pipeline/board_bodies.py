@@ -561,7 +561,7 @@ def level(ctx, part, x, top, w, room, pad, t0):
     if part.get("blind_at"):
         bt = ctx.at(part["blind_at"])
         cx, cy = x0 + bw / 2, y0 + bh / 2
-        veil = (f'<rect x="{_r(x0 - 24)}" y="{_r(y0 - 50)}" width="{_r(bw + 48)}" height="{_r(bh + 100)}" rx="30" '
+        veil = (f'<rect x="{_r(x0 - 24)}" y="{_r(y0 - 26)}" width="{_r(bw + 48)}" height="{_r(bh + 52)}" rx="30" '
                 f'fill="{ctx.col("page")}" fill-opacity="0.94" stroke="{ctx.col("rule")}" stroke-width="3"/>')
         s = bh * 0.8
         eye = (f'<path d="M{_r(cx - s)},{_r(cy)} Q{_r(cx)},{_r(cy - s * 0.9)} {_r(cx + s)},{_r(cy)} '
