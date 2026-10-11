@@ -14,6 +14,8 @@ class ImageJobTests(unittest.TestCase):
                 'images': [{'name': 'test-v01', 'purpose': '技术测试', 'prompt': '提示',
                             'references': [output], 'output': output}]}), encoding='utf-8')
             result = generate(source, Path(tmp, 'jobs'))[0]
+            self.assertIn('任务类型: 生图\n', result.read_text(encoding='utf-8'))
+            self.assertNotRegex(result.read_text(encoding='utf-8'), r'预计花费|实测要花的额度')
             self.assertEqual(result.read_text(encoding='utf-8').count(output), 3)
             self.assertFalse(any(ord(c) < 32 and c != '\n' for c in result.read_text(encoding='utf-8')))
             with self.assertRaises(FileExistsError): generate(source, result.parent)

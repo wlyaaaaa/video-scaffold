@@ -29,11 +29,11 @@ def generate(manifest, destination):
             raise ValueError(f"无效派单名：{name}")
         output = literal(item["output"])
         references = [literal(p) for p in item.get("references", [])]
-        header = {"任务": f"生成图片：{name}", "出处": spec["source"], "方案": "已定",
+        header = {"任务": f"生成图片：{name}", "任务类型": "生图", "出处": spec["source"], "方案": "已定",
                   "仓库": literal(spec["repository"]), "基线": spec.get("base_ref", "HEAD"),
                   "工作树": "使用已给路径，仅生成图片", "范围": output,
                   "代码上限": 0, "测试上限": 0, "时限分钟": spec.get("minutes", 15),
-                  "预计收益": item["purpose"], "预计花费": "一轮图片生成", "验证方式": "实测"}
+                  "预计收益": item["purpose"], "验证方式": "实测"}
         text = "---\n" + "\n".join(f"{k}: {v}" for k, v in header.items()) + "\n---\n\n"
         text += ("使用 Codex 内置图片生成能力；派出生图交 Luna low。\n"
                  "公开范围与个人资料按核验后的活动约法 L18、L20 和《个人资料与数据处理》原文。\n\n"
