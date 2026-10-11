@@ -69,11 +69,11 @@ class ArchiveLayoutTests(unittest.TestCase):
 
     def test_tiles_replay_and_undim(self):
         frag = self.build(dict(tiles=[
-            dict(title="禁令", at="原样", accent=True),
-            dict(title="要求", at="原样", dim_at="只往后加", undim_at="按月分卷")], replay=True, cols=2))
+            dict(title="原样存档", at="不改一个字", accent=True),
+            dict(title="只往后加", at="不改一个字", dim_at="按月分卷", undim_at="出了问题")], replay=True, cols=2))
         texts = [e for e in parse_fragment(frag).iter() if e.get("data-glyph-times")]
-        first = pages.cue_time(self.tl, "原样", 0)[0]
-        for e in texts:     # 重现：从 at 起直接打出，不等后文“禁令”再念到
+        first = pages.cue_time(self.tl, "不改一个字", 0)[0]
+        for e in texts:     # 已经完整念过的原文，从新的 at 重现
             self.assertLess(max(json.loads(e.get("data-glyph-times"))), first + 1)
         tracks = [json.loads(n.get("data-keys")) for n in parse_fragment(frag).iter() if n.get("data-keys")]
         self.assertTrue(any(t[-1][-1] == 1 and len(t) > 3 for t in tracks))

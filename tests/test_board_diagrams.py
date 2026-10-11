@@ -249,7 +249,7 @@ class DiagramTests(unittest.TestCase):
                  "fold_at": "全打满", "return_at": "注意力", "result": {"text": "更全面", "at": "更全面"}},
                 {"tiles": [{"title": "毛病", "at": "毛病", "logo": "x"}, {"title": "流量", "at": "流量"}]},
                 {"rail": [{"label": "清手机", "logo": "x"}, {"label": "换电脑", "logo": "x"}], "current": 1,
-                 "at": "毛病", "replay": True},
+                 "at": "真用过", "replay": True},
             ]:
                 builder.element(el)
             frag = "".join(builder.out + builder.mout)
@@ -262,10 +262,10 @@ class DiagramTests(unittest.TestCase):
             idx = TEXT.find(txt)
             for k, at in enumerate(json.loads(el.get("data-glyph-times"))):
                 ct = self.tl.char_time(idx + k)
-                if ct is not None and txt != "清手机":
+                if ct is not None:
                     self.assertGreaterEqual(at + 1e-6, ct, txt)
         done = next(el for el in root.iter() if el.get("data-glyph-times") and "".join(el.itertext()) == "清手机")
-        self.assertLess(max(json.loads(done.get("data-glyph-times"))), pages.cue_time(self.tl, "清手机", 0)[0])
+        self.assertEqual(min(json.loads(done.get("data-glyph-times"))), pages.cue_time(self.tl, "真用过", 0)[0])
         self.assertEqual([f for f in pages.unfinished(frag, self.tl.duration + 2) if not f[4]], [])
 
     def test_bad_time_range_fails(self):
