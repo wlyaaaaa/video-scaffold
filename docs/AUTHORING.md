@@ -104,14 +104,14 @@
 | `deck` | 右侧卡片组：一张接一张替换（旧卡淡出上移，新卡升起；`enter` 可选 `rise`/`pop`/`drop`/`iris`）。卡内：等宽小标签、标题（右侧可配动态图标 `icon`）、内容块 | `deck: [{at, label, title, title_at, icon, icon_at, body, frame, pad, enter}]`、`x`/`y`/`w`/`h` |
 | 卡片内容 `body` | `photo`（照片缓慢推近，`bleed` 铺满卡片）、`wave`（说话声波，`at`–`until`）、`grid`（方块逐个出现，`flip` 到点变黑）、`comments`（短评论气泡逐条弹出）；`pipeline/board_bodies.py` 另有 `chat`（对话气泡，可描框/加注/变淡）、`dial`（表盘：说好的时长→拖满一圈）、`scan`（人一眼圈出毛病、扫描带扫过）、`gauges`（容量槽依次涨、全满变黑一震）、`ring`（注意力从一点扫满一圈）、`bar`（进度条涨或退）、`flow`（点从左框流到右框）、`terminal`（代码行依次写出）、`inspect`（一排排看着都对、逐行打勾，放大镜移到一行，那行原来不对：`rows`、`tick_at`、`lens_at`、`wrong_at`、`target`）、`todo`（任务单逐条列出、打勾；某条 `drop_at` 划掉掉落，`ghost_at` 留虚线空位，`restore_at` 补回；`absent` 一开始就不在；`scan_at` 扫描带扫过）、`level`（水位条按 `steps: [[绑词, 比例, 时长?, 颜色?]]` 一段段涨，碰 `limit` 虚线时 `hit_at` 一震，`blind_at` 盖上划掉的眼睛表示“看不到”）。卡片标题图标另有 `check`、`hook`、`eye`、`lock`；`grid` 可写 `glyph: "image"`（图片占位）、`center: true` | 每块 `{kind, …}` |
 | `cards` | 一排（或一张）固定卡片，各自到点升起、一直留着，卡内同 `deck` | `cards: [卡…]`、`x`/`y`/`w`/`h`/`gap` |
-| `tiles` | 分类网格、并列对照或逐项清单；卡片按词轴进入，可移位、加锁、划线或变淡 | `tiles: [{title, at, title_at?, size?, lines: [{text, at, size?, color?, gap?}], dark?, accent?, focus_at?, lock_at?, strike_at?, dim_at?, move_at?, move_to: [x,y]}]`；`cols`、`x/y/w/h/gap` 控制网格，`w/h` 是每张卡的大小 |
+| `tiles` | 分类网格、并列对照或逐项清单；卡片按词轴进入，可移位、加锁、划线或变淡 | `tiles: [{title, at, title_at?, size?, logo?, lines: [{text, at, size?, color?, gap?}], dark?, accent?, focus_at?, lock_at?, strike_at?, dim_at?, move_at?, move_to: [x,y]}]`；`cols`、`x/y/w/h/gap` 控制网格，`w/h` 是每张卡的大小 |
 | 卡片内容 `context_stack` | 对话条保持固定位置，最新一条突出；旧条目可淡去、聚拢到窗口中 | `body: [{kind: "context_stack", items: [{at, text?, text_at?, size?, dim_at?}], window_at?, collapse_at?, h?}]`；文字仍使用逐字词轴，聚拢为可完成并检查的有限动画 |
 | `timeline` | 细轴画出、刻度依次弹出；节点按念到弹出，最新节点绿色呼吸；`trace` 让一个点沿轴走过去，刻度随之变绿 | `timeline: [{label, at, x, anchor, sub}]`、`y`、`trace: {from, to, at, until}` |
 | `checklist` | 清单逐条出现，每条配会动的图标（`bolt` 呼吸、`wander` 点沿弯路走、`burst` 冲击波、`math` 描线、`quote`）；绿色指示条跟着念到的那条走，旧条变淡 | `checklist: [{text, at, icon, pre, pre_at}]`、`focus` |
 | `tally` | 数字条形：条从左长出、数字滚动、单位按念到出现；有 `total` 时后面的条移上去接成一整条，总数滚动（小标签在数字上方） | `tally: [{label, value, at, dur, unit, unit_at, number}]`、`total: {label, at, value, count_at, unit, unit_at}` |
 | `wipe` | 底色圆从一点扩大盖住整页（边上一圈细绿线），用在换段落前 | `wipe`（绑词）、`x`/`y`、`dur` |
 
-**用标志代表某一方（logo）。** 圆点代表某个公司或模型时（Claude、Claude Code、Opus 一方；OpenAI、Codex、GPT 一方……），可以换成标志图：分镜表顶层写 `"brands": {"claude": "../art/brand/claude.png", "openai": "../art/brand/openai.png"}`，元素里写 `"logo": "claude"`（也可直接写图片路径）。标志放进白底圆里，按圆裁切，透明底和纯白底的方图都行；找不到图直接报错。不写 `logo` 的地方画法和原来完全一样。支持的位置：`timeline` 节点（`logo`、`logo_r` 默认 52，最新节点描绿圈）、`tally` 行（名字前放标志）、卡片 `logo`（标题右侧，和 `icon` 二选一）、`comments` 胶囊（条目写 `[文字, 绑词, 标志]` 或 `{text, at, logo}`）、`focus_network` 节点、`cross_check` 的 `checker.logo`、`lanes` 的 `spawn.logo`、`condense` 的 `worker.logo`。圆里原来写名字的节点（如核对者、分出去的模型）有标志时名字改写在圆下方，保持看得清。标志只代表“哪一方”，不代表数据。
+**用标志代表某一方（logo）。** 圆点代表某个公司或模型时（Claude、Claude Code、Opus 一方；OpenAI、Codex、GPT 一方……），可以换成标志图：分镜表顶层写 `"brands": {"claude": "../art/brand/claude.png", "openai": "../art/brand/openai.png"}`，元素里写 `"logo": "claude"`（也可直接写图片路径）。标志放进白底圆里，按圆裁切，透明底和纯白底的方图都行；找不到图直接报错。不写 `logo` 的地方画法和原来完全一样。支持的位置：`timeline` 节点（`logo`、`logo_r` 默认 52，最新节点描绿圈）、`tiles` 卡片（标题右侧，`logo_r`、`logo_at`）、`rail` 步骤、`tree` 节点、`tally` 行（名字前放标志）、卡片 `logo`（标题右侧，和 `icon` 二选一）、`comments` 胶囊（条目写 `[文字, 绑词, 标志]` 或 `{text, at, logo}`）、`focus_network` 节点、`cross_check` 的 `checker.logo`、`lanes` 的 `spawn.logo`、`condense` 的 `worker.logo`。圆里原来写名字的节点（如核对者、分出去的模型）有标志时名字改写在圆下方，保持看得清。标志只代表“哪一方”，不代表数据。
 
 **动画放完才退场（出片时检查，不过就报错）。** 每个有限的动画（入场、描线、滚动、移动、划线……）都要在它所在的组退场（`exit_at`）、整页被 `wipe` 盖住或换页之前放完，并停够 `config.PAGE_MOTION["hold"]`（0.25 秒）；呼吸、循环流动、照片推近、声波和进度条不算。念得快放不下，就缩短动画、提前到前一个词，或换动法，不许半路切走。本人已审定、不再改的旧元素可写 `"hold_check": "warn"`，只提示不拦。一段配音一张表整段出片，不分段拼接。
 
@@ -131,7 +131,8 @@
 | `condense` | `{rows: [{at, user?, keep?, lines?}], collapse_at, summary_label?, stamp?: {text, at}, worker?: {at, label, below?}, keep_at?}`：一长串对话按念到依次进来，到 `collapse_at` 压成一张摘要卡；`keep` 的几条缩进摘要，其余用户原话变淡掉落；`stamp` 盖章、`worker` 画照着摘要干活的 AI（`below` 放在摘要下方），`keep_at` 圈出留下的几条。`summary_w/h/x/y`、`row_h`、`chip_scale` 调尺寸。 |
 | `cross_check` | `{left_label, right_label, checker: {label, at}, rows: [{at, status, link_at?, status_at?, note?, right_text?, restore_at?}]}`：左列原话、右列结果，中间核对者逐条连线；`status` 为 `ok`（对上打勾）、`missing`（虚线空位）、`unproven`（问号）、`changed`（划掉、不等号）。 |
 | `lanes` | `{lanes: [{label, at}], spawn?: {at, node_text?, offset?}, dots?}`：几条并行轨道，主线一直在走，另一条从某点分出来并行跑，互不等待。 |
-| `rail` | 值为步骤列表（字符串或 `{label, at}`），`current` 当前第几步、`go_at` 从上一步走过来：章节进度轨，已讲过的黑点灰字、当前绿点绿字，没讲到的只留空点、不提前写字。 |
+| `rail` | 值为步骤列表（字符串或 `{label, at, logo?}`），`current` 当前第几步、`go_at` 从上一步走过来：章节进度轨，已讲过的黑点灰字、当前绿点绿字，没讲到的只留空点、不提前写字。步骤写 `logo` 时点换成标志（当前一步描绿圈，`logo_r` 调大小），适合“一个个讲过几个型号/角色”的人员轨。讲过的步骤名跟着点直接打出。 |
+| `tree` | `{at, label?, logo?, children: [节点…]}`：分派树，一个节点按念到往下分出子节点、一层层拆开；`return_at` 结果点从最底层逐层流回顶上（`return_step` 每层秒数），`fold_at` 中间层变淡，`result: {text, at}` 在根旁弹出结果卡。`x/y/w`、`level_gap`、`node_r`（每层半径列表）调尺寸。适合委派、层层拆任务、汇总结果。 |
 | `focus_network` 补充 | `node_r`、`hub_r`、`center_size` 放大节点和中心；`center_at` 让前面已讲过的中心名字从该词起直接打出。 |
 
 一段拆成多次出片时，`progress` 可用四项 `[总段数, 当前段下标, 结束比例, 起始比例]`，例如后半段从 0.42 走到 1；原来的三项写法继续从 0 开始。起止比例只控制这一段的进度，不修改旁白时钟。
