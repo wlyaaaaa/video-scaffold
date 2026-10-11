@@ -115,7 +115,7 @@
 
 **动画放完才退场（出片时检查，不过就报错）。** 每个有限的动画（入场、描线、滚动、移动、划线……）都要在它所在的组退场（`exit_at`）、整页被 `wipe` 盖住或换页之前放完，并停够 `config.PAGE_MOTION["hold"]`（0.25 秒）；呼吸、循环流动、照片推近、声波和进度条不算。念得快放不下，就缩短动画、提前到前一个词，或换动法，不许半路切走。本人已审定、不再改的旧元素可写 `"hold_check": "warn"`，只提示不拦。一段配音一张表整段出片，不分段拼接。
 
-这些版式用到的运行时原语：`type`（`data-glyph-times` 逐字、`data-glyph-from` 由浅变深）、`keys`（关键帧移动/缩放/透明度）、`mark`（按字的位置画底色条、删除线、下划线）、`iris`（圆半径，盖页或圆形揭示）、`wave`、`shake`，以及文字的 `data-follow`（单位跟在滚动数字后面）。一期的内容写在本期 `pages\*.json`，版式不够用时在 `boards.py` 加一种（会复用的才加）。
+这些版式用到的运行时原语：`type`（`data-glyph-times` 逐字、`data-glyph-from` 由浅变深）、`keys`（关键帧移动/缩放/透明度）、`mark`（按字的位置画底色条、删除线、下划线）、`iris`（圆半径，盖页或圆形揭示）、`wave`、`shake`、`frames`（录屏帧按 `data-fps` 逐帧显示，前一帧垫在下面防闪白），以及文字的 `data-follow`（单位跟在滚动数字后面）。一期的内容写在本期 `pages\*.json`，版式不够用时在 `boards.py` 加一种（会复用的才加）。
 
 **词轴动态图解（`pipeline/board_diagrams.py`）。** 复用同一运行时，不引入另一个动画引擎。所有版式都有顶层 `at`，坐标仍为 4K 画布；准确标签逐字走词轴。图解是表达关系的示意，不能当成真实监控数据。
 
@@ -132,6 +132,7 @@
 | `cross_check` | `{left_label, right_label, checker: {label, at}, rows: [{at, status, link_at?, status_at?, note?, right_text?, restore_at?}]}`：左列原话、右列结果，中间核对者逐条连线；`status` 为 `ok`（对上打勾）、`missing`（虚线空位）、`unproven`（问号）、`changed`（划掉、不等号）。 |
 | `lanes` | `{lanes: [{label, at}], spawn?: {at, node_text?, offset?}, dots?}`：几条并行轨道，主线一直在走，另一条从某点分出来并行跑，互不等待。 |
 | `rail` | 值为步骤列表（字符串或 `{label, at}`），`current` 当前第几步、`go_at` 从上一步走过来：章节进度轨，已讲过的黑点灰字、当前绿点绿字，没讲到的只留空点、不提前写字。 |
+| `screen` | 网页/软件窗口（白卡、三个灰点、顶上小标签）：里面按词轴换几段真截图或录屏，后一段叠化盖上前一段。截图 `image` 可 `crop: [x,y,w,h]`（源像素，等比铺满、多余裁掉）、`pan: {to, at, dur}` 平移/推拉到另一块区域（长页滑到某一节）；录屏 `clip` 写 `from`/`to` 秒和 `crop`，出片时按区间抽帧（默认 30fps、宽 1280，缓存在本次工作目录），运行时 `frames` 原语逐帧显示，放完停在最后一帧，要在下一段盖上前放完。`marks: [{at, box, shape: rect\|circle\|none, label, label_at, side}]` 按源像素圈出局部并弹出绿胶囊。截图里有隐私先裁掉；`screenshot`（整图不裁）照旧可用 |
 | `focus_network` 补充 | `node_r`、`hub_r`、`center_size` 放大节点和中心；`center_at` 让前面已讲过的中心名字从该词起直接打出。 |
 
 一段拆成多次出片时，`progress` 可用四项 `[总段数, 当前段下标, 结束比例, 起始比例]`，例如后半段从 0.42 走到 1；原来的三项写法继续从 0 开始。起止比例只控制这一段的进度，不修改旁白时钟。

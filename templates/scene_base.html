@@ -285,6 +285,12 @@
       rec.freq = parseFloat(el.getAttribute("data-freq") || "48");
       rec.decay = parseFloat(el.getAttribute("data-decay") || "7");
     }
+    if (kind === "frames") {            // pre-extracted screen-recording frames: show frame floor((t-delay)*fps)
+      rec.fps = parseFloat(el.getAttribute("data-fps") || "30");
+      rec.frames = [...el.children];
+      rec.frames.forEach(f => { f.style.display = "none"; });
+      rec.shown = -1;
+    }
     if (kind === "shockwave") rec.maxs = parseFloat(el.getAttribute("data-max") || "8");
     if (kind === "flip") {               // Yu-Gi-Oh card flip-in reveal
       rec.ry0 = parseFloat(el.getAttribute("data-ry0") || "-100");
@@ -482,6 +488,15 @@
         el.setAttribute("x", (x0 - pad).toFixed(1)); el.setAttribute("y", y.toFixed(1));
         el.setAttribute("height", h.toFixed(1));
         el.setAttribute("width", Math.max(0, (x1 - x0 + 2 * pad) * p).toFixed(1));
+        break;
+      }
+      case "frames": {             // the previous frame stays underneath, so a late decode never flashes empty
+        const n = rec.frames.length;
+        const k = Math.max(0, Math.min(n - 1, Math.floor((t - delay) * rec.fps + 1e-6)));
+        if (k !== rec.shown) {
+          rec.frames.forEach((f, i) => { f.style.display = (i === k || i === k - 1) ? "inline" : "none"; });
+          rec.shown = k;
+        }
         break;
       }
       case "iris": { const q = el.hasAttribute("data-ease") ? p : easeInOut(raw);
