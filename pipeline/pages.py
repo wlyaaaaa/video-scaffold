@@ -183,7 +183,7 @@ CONTENT_BOTTOM = 1840   # 往下留给字幕和进度条
 
 
 class PageBuilder:
-    def __init__(self, tl, page, start, start_pos, base, progress=None, end=None, brands=None):
+    def __init__(self, tl, page, start, start_pos, base, progress=None, end=None, brands=None, *, prepare_assets=True):
         import v2lib as L
         self.L, self.tl, self.page, self.start, self.base = L, tl, page, start, base
         self.brands = brands or {}     # 表顶层 brands：标志名 → 图片路径，元素里写 "logo": "<名字>"
@@ -201,6 +201,44 @@ class PageBuilder:
         self.progress = progress
         self.media = {}
         self.options = {}
+        self.prepare_assets = prepare_assets
+        self.glyph_sources = {}
+        self._glyph_arrays = {}
+
+    def glyph_reference(self, plain, cue=None, summary=False):
+        """独立从原文定位字的实际念出时间，不使用生成器给出的出字时间。"""
+        refs = [None] * len(plain)
+        core = plain.strip('“”"「」 ')
+        if summary or not core:
+            return refs
+        anchor = cue_time(self.tl, cue, self.pos)[1] if cue else self.pos
+        matches = [m.start() for m in re.finditer('(?=' + re.escape(core) + ')', self.tl.text)]
+        current = [p for p in matches if p + len(core) > self.pos]
+        containing = [p for p in current if p <= anchor < p + len(core)]
+        past = [p for p in matches if p < self.pos and all(
+            self.tl.char_time(q) is None or self.tl.char_time(q) <= self.start
+            for q in range(p, p + len(core)))]
+        choices = containing or past or [p for p in current if p >= anchor] or current
+        if not choices:
+            return refs                       # 完整字样不在原文中，是概括，不逐个散字猜匹配
+        pos, lead = choices[0], plain.find(core)
+        for k, ch in enumerate(core):
+            if ch.isalnum():                   # 标点和空格不绑定到相邻词的任意时间
+                refs[lead + k] = self.tl.char_time(pos + k)
+        return refs
+
+    def record_glyphs(self, plain, cue, start, summary, times=None):
+        if times is not None:
+            self._glyph_arrays[id(times)] = (times, self.glyph_reference(plain, cue, summary))
+        return times
+
+    def record_glyph_svg(self, svg, times):
+        node = ET.fromstring(svg)
+        entry = self._glyph_arrays.get(id(times))
+        refs = entry[1] if entry else self.glyph_reference(''.join(node.itertext()), self.options.get('at'),
+                                                        self.options.get('summary', False))
+        self.glyph_sources.setdefault(_glyph_key(node), []).append(refs)
+        return svg
 
     def at(self, cue, default=None):
         """绑词 → 本页秒数。没写绑词时只接受调用方给的默认（同一元素里已绑好的时刻）。"""
@@ -217,6 +255,8 @@ class PageBuilder:
     def glyph_times(self, s, delay):
         """逐字词轴。原文逐字揭示；概括标题必须显式绑一个已念到的词。"""
         plain = "".join(t for t, _ in markup(s))
+        if self.options.get('summary'):
+            return None
         pos = self.tl.text.find(plain, self.pos)
         if pos < 0:
             return None
@@ -251,6 +291,7 @@ class PageBuilder:
 
     def element(self, el):
         L, th = self.L, self.th
+        self.options = el
         if "gap" in el and len(el) == 1:
             self.y += el["gap"]; return
         from pipeline import boards
@@ -273,6 +314,12 @@ class PageBuilder:
                 content = "".join(out[first:]); del out[first:]
                 out.append(f'<g data-anim="fade-out" data-delay="{when}" data-dur="{el.get("exit_dur", 0.3)}">'
                            f'{content}</g>')
+        from pipeline.build_scene import parse_fragment
+        for pieces, first in ((self.out, before_out), (self.mout, before_media)):
+            for node in parse_fragment(''.join(pieces[first:])).iter():
+                if node.get('data-glyph-times') and _glyph_key(node) not in self.glyph_sources:
+                    self.glyph_sources[_glyph_key(node)] = [self.glyph_reference(
+                        ''.join(node.itertext()), el.get('at'), el.get('summary', False))]
 
     def flow_element(self, el, d):
         L, th = self.L, self.th
@@ -417,6 +464,50 @@ class PageBuilder:
 AMBIENT = ("pulse", "float", "drift", "flow-blob", "wave", "push", "fade-out", "xfade")
 
 
+def _glyph_key(node):
+    # 时间字段不作关联键：最终 SVG 被改成提前出字后仍核对原来的词轴来源。
+    return (node.tag.rsplit('}', 1)[-1], tuple(sorted((k, v) for k, v in node.attrib.items()
+                                  if k not in ('data-glyph-times', 'data-delay', 'data-dur'))),
+            ''.join(node.itertext()))
+
+
+def early_glyphs(fragment, builder):
+    """核对最终 SVG；返回（字，成片显示秒，真实念出秒），考虑祖先的可见窗口。"""
+    from pipeline.build_scene import parse_fragment
+    used = {}
+
+    def walk(node, visible=0.0, until=None):
+        kind = node.get('data-anim')
+        delay = float(node.get('data-delay', 0))
+        until = builder.end - builder.start if until is None else until
+        if kind and kind not in ('fade-out', 'xfade', 'keys', 'wave', 'shake'):
+            visible = max(visible, delay)
+        if kind in ('fade-out', 'xfade'):
+            until = min(until, delay + float(node.get('data-dur', 1)))
+        if kind == 'keys':
+            track = json.loads(node.get('data-keys'))
+            if track and track[0][4] <= 0:
+                first = next((i for i, k in enumerate(track) if k[4] > 0), None)
+                visible = max(visible, track[max(0, first - 1)][0]) if first is not None else until
+        if node.get('data-glyph-times'):
+            plain = ''.join(node.itertext())
+            times = json.loads(node.get('data-glyph-times'))
+            if len(times) != len(plain) or any(not isinstance(t, (int, float)) or not math.isfinite(t) for t in times):
+                raise ValueError('逐字时间轴必须为每个字提供一个有限数值')
+            key = _glyph_key(node)
+            candidates = builder.glyph_sources.get(key) or [builder.glyph_reference(plain)]
+            idx = used.get(key, 0); used[key] = idx + 1
+            refs = candidates[min(idx, len(candidates) - 1)]
+            for ch, t, spoken in zip(plain, times, refs):
+                shown = max(visible, t)
+                if spoken is not None and t < 9000 and shown < until and builder.start + shown + 0.001 < spoken:
+                    yield ch, builder.start + shown, spoken
+        for child in node:
+            yield from walk(child, visible, until)
+
+    yield from walk(parse_fragment(fragment))
+
+
 def unfinished(fragment, duration, transition=0.0, hold=None):
     """退场前没放完的动画。返回 [(动作, 本页结束秒, 退场秒, 说明)]。
 
@@ -519,39 +610,50 @@ class Project:
         import v2lib as L
         L.use_theme(self.spec.get("theme", config.PAGE_THEME))
         config.BG_VIDEO = (str(_resolve(self.base, self.spec["background"])) if self.spec.get("background")
-                           else L.page_background(self.work / "page.png"))
+                           else str(self.work / "page.png"))
         self.tl = load_timeline(self.spec, self.base)
         self.pages = plan_pages(self.spec, self.tl)
+
+    def _build_page(self, i, *, prepare_assets):
+        page, (t0, t1, pos) = self.spec['pages'][i], self.pages[i]
+        builder = PageBuilder(self.tl, page, t0, pos, self.base, page.get('progress', self.spec.get('progress')),
+                              t1, self.spec.get('brands'), prepare_assets=prepare_assets)
+        frag = builder.build()
+        early = list(early_glyphs(frag, builder))
+        if early:
+            rows = '; '.join(f'“{ch}”显示 {shown:.3f}s，念到 {spoken:.3f}s' for ch, shown, spoken in early[:8])
+            raise ValueError(f'page {i + 1}: {len(early)} 个字早于念到：{rows}')
+        found = list(unfinished(frag, t1 - t0, config.TRANSITION_SECONDS))
+        for k, e, x, txt, _ in [f for f in found if f[4]]:
+            warnings.warn(f"page {i + 1}（已审定，只提示）: {k} 到 {t0 + e:.2f}s 才放完、{t0 + x:.2f}s 就退场“{txt}”")
+        late = [f for f in found if not f[4]]
+        if late:
+            rows = '; '.join(f'{k} 到 {t0 + e:.2f}s 才放完、{t0 + x:.2f}s 就退场“{txt}”' for k, e, x, txt, _ in late[:8])
+            raise ValueError(f"page {i + 1}: {len(late)} 个动画没放完就退场或换页（要停够 "
+                             f"{config.PAGE_MOTION['hold']}s）：{rows}")
+        for a, b in motion_gaps(frag, t1 - t0):
+            warnings.warn(f'page {i + 1}: main content static for {b-a:.2f}s ({t0+a:.2f}–{t0+b:.2f}s)')
+        return builder, frag
 
     def scenes(self):
         from pipeline import build_scene
         out, durs = [], []
-        prog = self.spec.get("progress")
-        for i, (page, (t0, t1, pos)) in enumerate(zip(self.spec["pages"], self.pages)):
-            progress = page.get("progress", prog)
-            frag = PageBuilder(self.tl, page, t0, pos, self.base, progress, t1, self.spec.get("brands")).build()
-            found = list(unfinished(frag, t1 - t0, config.TRANSITION_SECONDS))
-            for k, e, x, txt, _ in [f for f in found if f[4]]:
-                warnings.warn(f"page {i + 1}（已审定，只提示）: {k} 到 {t0 + e:.2f}s 才放完、{t0 + x:.2f}s 就退场“{txt}”")
-            late = [f for f in found if not f[4]]
-            if late:
-                rows = "; ".join(f"{k} 到 {t0 + e:.2f}s 才放完、{t0 + x:.2f}s 就退场“{txt}”" for k, e, x, txt, _ in late[:8])
-                raise ValueError(f"page {i + 1}: {len(late)} 个动画没放完就退场或换页（要停够 "
-                                 f"{config.PAGE_MOTION['hold']}s）：{rows}")
-            for a,b in motion_gaps(frag,t1-t0):
-                warnings.warn(f"page {i+1}: main content static for {b-a:.2f}s ({t0+a:.2f}–{t0+b:.2f}s)")
+        for i, (t0, t1, _) in enumerate(self.pages):
+            _, frag = self._build_page(i, prepare_assets=True)
             path = self.work / "scene" / f"scene_{i + 1:02d}.html"
             path.parent.mkdir(parents=True, exist_ok=True)
             (self.work / "scene" / f"fragment_{i + 1:02d}.svg").write_text(frag, encoding="utf-8")
             build_scene.build(frag, str(path), srt=[], strict=True)
             out.append(str(path)); durs.append(round(t1 - t0, 4))
+        if not self.spec.get('background'):
+            import v2lib as L
+            L.page_background(self.work / 'page.png')
         return out, durs
 
     def plan(self):
         rows = []
         for i, (page, (t0, t1, pos)) in enumerate(zip(self.spec["pages"], self.pages)):
-            b = PageBuilder(self.tl, page, t0, pos, self.base, end=t1, brands=self.spec.get("brands"))
-            b.build()
+            b, _ = self._build_page(i, prepare_assets=False)
             rows.append({"page": i + 1, "start": round(t0, 2), "end": round(t1, 2),
                          "elements": [[next(k for k in el if k not in ("at", "size", "y")), el.get("at"),
                                        round(t0 + d, 2)] for el, d in b.marks]})

@@ -58,8 +58,9 @@ class Ctx:
         search=False：已讲过的字样重现，不在后文里找，直接从 start/cue 起打出。"""
         tl, b = self.b.tl, self.b
         summary = summary or b.options.get("summary", False)
-        if hasattr(b, "record_glyphs"):
-            b.record_glyphs(plain, cue, start, summary or not search)
+        def finish(times):
+            record = getattr(b, 'record_glyphs', None)
+            return record(plain, cue, start, summary or not search, times) if record else times
         t0 = start if start is not None else self.at(cue)
         idx = -1
         core = plain.strip("“”\"「」 ")
@@ -75,7 +76,7 @@ class Ctx:
             for ch in plain:
                 out.append(round(t0 + k * TYPE_STEP, 4))
                 k += 0 if ch.isspace() else 1
-            return out
+            return finish(out)
         times, last = [], None
         lead = plain.find(core)
         spoken = []
@@ -87,7 +88,7 @@ class Ctx:
         first = next((v for v in spoken if v is not None), t0)
         spoken = [first if v is None else v for v in spoken]
         times = [first] * lead + spoken + [spoken[-1]] * (len(plain) - lead - len(core))
-        return [round(max(v, t0 if start is not None else 0.0), 4) for v in times]
+        return finish([round(max(v, t0 if start is not None else 0.0), 4) for v in times])
 
     # ---- 品牌标志 ----
     def logo_href(self, logo):
@@ -135,10 +136,12 @@ def text(ctx, s, x, y, size, times, *, font="heavy", weight=900, fill="ink", anc
     op = f' opacity="{opacity}"' if opacity is not None else ""
     if follow:
         op += f' data-follow="#{follow}" data-gap="{gap}"'
-    return (f'<text{tid_a} data-anim="type" data-delay="{_r(min(times))}" data-dur="0.3" '
+    svg = (f'<text{tid_a} data-anim="type" data-delay="{_r(min(times))}" data-dur="0.3" '
             f'data-glyph-times="{J(times)}" data-glyph-fade="{fade}"{settle_a} x="{_r(x)}" y="{_r(y)}" '
             f'font-family="{esc(ctx.font(font))}" font-size="{size}" font-weight="{weight}" fill="{fill_c}" '
             f'text-anchor="{anchor}" letter-spacing="{ls}"{op}>{body}</text>')
+    record = getattr(ctx.b, 'record_glyph_svg', None)
+    return record(svg, times) if record else svg
 
 
 def anim(kind, delay, dur, inner, extra=""):
