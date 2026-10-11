@@ -104,6 +104,8 @@
 | `deck` | 右侧卡片组：一张接一张替换（旧卡淡出上移，新卡升起；`enter` 可选 `rise`/`pop`/`drop`/`iris`）。卡内：等宽小标签、标题（右侧可配动态图标 `icon`）、内容块 | `deck: [{at, label, title, title_at, icon, icon_at, body, frame, pad, enter}]`、`x`/`y`/`w`/`h` |
 | 卡片内容 `body` | `photo`（照片缓慢推近，`bleed` 铺满卡片）、`wave`（说话声波，`at`–`until`）、`grid`（方块逐个出现，`flip` 到点变黑）、`comments`（短评论气泡逐条弹出）；`pipeline/board_bodies.py` 另有 `chat`（对话气泡，可描框/加注/变淡）、`dial`（表盘：说好的时长→拖满一圈）、`scan`（人一眼圈出毛病、扫描带扫过）、`gauges`（容量槽依次涨、全满变黑一震）、`ring`（注意力从一点扫满一圈）、`bar`（进度条涨或退）、`flow`（点从左框流到右框）、`terminal`（代码行依次写出） | 每块 `{kind, …}` |
 | `cards` | 一排（或一张）固定卡片，各自到点升起、一直留着，卡内同 `deck` | `cards: [卡…]`、`x`/`y`/`w`/`h`/`gap` |
+| `tiles` | 分类网格、并列对照或逐项清单；卡片按词轴进入，可移位、加锁、划线或变淡 | `tiles: [{title, at, title_at?, size?, lines: [{text, at, size?, color?, gap?}], dark?, accent?, focus_at?, lock_at?, strike_at?, dim_at?, move_at?, move_to: [x,y]}]`；`cols`、`x/y/w/h/gap` 控制网格，`w/h` 是每张卡的大小 |
+| 卡片内容 `context_stack` | 对话条保持固定位置，最新一条突出；旧条目可淡去、聚拢到窗口中 | `body: [{kind: "context_stack", items: [{at, text?, text_at?, size?, dim_at?}], window_at?, collapse_at?, h?}]`；文字仍使用逐字词轴，聚拢为可完成并检查的有限动画 |
 | `timeline` | 细轴画出、刻度依次弹出；节点按念到弹出，最新节点绿色呼吸；`trace` 让一个点沿轴走过去，刻度随之变绿 | `timeline: [{label, at, x, anchor, sub}]`、`y`、`trace: {from, to, at, until}` |
 | `checklist` | 清单逐条出现，每条配会动的图标（`bolt` 呼吸、`wander` 点沿弯路走、`burst` 冲击波、`math` 描线、`quote`）；绿色指示条跟着念到的那条走，旧条变淡 | `checklist: [{text, at, icon, pre, pre_at}]`、`focus` |
 | `tally` | 数字条形：条从左长出、数字滚动、单位按念到出现；有 `total` 时后面的条移上去接成一整条，总数滚动（小标签在数字上方） | `tally: [{label, value, at, dur, unit, unit_at, number}]`、`total: {label, at, value, count_at, unit, unit_at}` |

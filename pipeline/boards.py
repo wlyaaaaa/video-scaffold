@@ -706,8 +706,76 @@ def wipe(ctx, el):
             f'stroke-width="10"/>')   # 0.99：盖满整页时截图仍带透明通道，编码不换格式
 
 
+def tiles(ctx, el):
+    """词轴卡片网格：分类、对照、动作清单；同一卡片可移位、变淡、划线或加锁。"""
+    items = el["tiles"]
+    cols = el.get("cols", len(items))
+    if cols < 1:
+        raise ValueError("tiles cols must be positive")
+    x, y = el.get("x", 240), el.get("y", 640)
+    w, h, gap = el.get("w", 1000), el.get("h", 380), el.get("gap", 48)
+    out = []
+    for k, it in enumerate(items):
+        tx, ty = x + (k % cols) * (w + gap), y + (k // cols) * (h + gap)
+        at = ctx.at(it["at"])
+        dark = it.get("dark", False)
+        fg, bg = ("#FFFFFF", ctx.col("ink")) if dark else ("ink", "#FFFFFF")
+        border = ctx.col("accent" if it.get("accent") else "rule")
+        parts = [f'<rect width="{w}" height="{h}" rx="28" fill="{bg}" stroke="{border}" stroke-width="3"/>']
+        parts.append(f'<rect x="0" y="32" width="10" height="{h - 64}" rx="5" '
+                     f'fill="{ctx.col("accent")}" fill-opacity="{1 if it.get("accent") or dark else 0.22}"/>')
+        size = it.get("size", el.get("size", 140))
+        title = it.get("title", "")
+        pad = it.get("pad", 64)
+        lines = it.get("lines", [])
+        baseline = pad + size if lines else h / 2 + size * 0.36
+        if title:
+            tid = _id("tile")
+            tt = ctx.glyphs(plain_of(title), it.get("title_at", it["at"]))
+            parts.append(text(ctx, title, pad, baseline, size, tt, fill=fg, tid=tid,
+                              settle=not dark, fade=it.get("fade", GLYPH_FADE)))
+            if it.get("strike_at"):
+                st = ctx.at(it["strike_at"])
+                parts.append(mark_rect(tid, 0, len(plain_of(title)), st, it.get("strike_dur", 0.28),
+                                       ctx.col("muted"), "strike"))
+        ly = baseline
+        for line in lines:
+            fs = line.get("size", 100)
+            ly += line.get("gap", fs * 1.5)
+            gt = ctx.glyphs(plain_of(line["text"]), line["at"])
+            parts.append(text(ctx, line["text"], pad, ly, fs, gt,
+                              fill=line.get("color", "#FFFFFF" if dark else "muted"),
+                              font="sans", weight=600, settle=False))
+        if it.get("focus_at"):
+            ft = ctx.at(it["focus_at"])
+            parts.append(f'<rect data-anim="draw" data-delay="{_r(ft)}" data-dur="0.4" '
+                         f'x="-8" y="-8" width="{w + 16}" height="{h + 16}" rx="34" fill="none" '
+                         f'stroke="{ctx.col("accent")}" stroke-width="8"/>')
+        if it.get("lock_at"):
+            lt = ctx.at(it["lock_at"])
+            lx, ly = w - 136, 56
+            lock = (f'<path d="M{lx + 12},{ly + 38} v-15 a26,26 0 0 1 52,0 v15" fill="none" '
+                    f'stroke="{ctx.col("accent")}" stroke-width="9"/>'
+                    f'<rect x="{lx}" y="{ly + 35}" width="76" height="62" rx="10" fill="{ctx.col("accent")}"/>'
+                    f'<circle cx="{lx + 38}" cy="{ly + 60}" r="7" fill="#FFFFFF"/>')
+            parts.append(anim("pop", lt, it.get("lock_dur", 0.35), lock))
+        inner = "".join(parts)
+        if it.get("dim_at"):
+            dt = ctx.at(it["dim_at"])
+            inner = keys([[0, 0, 0, 1, 1], [dt, 0, 0, 1, 1],
+                          [dt + it.get("dim_dur", 0.3), 0, 0, 1, it.get("opacity", 0.25)]], inner)
+        if it.get("move_at"):
+            mt, dest = ctx.at(it["move_at"]), it["move_to"]
+            inner = keys([[0, 0, 0, 1, 1], [mt, 0, 0, 1, 1],
+                          [mt + it.get("move_dur", 0.55), dest[0] - tx, dest[1] - ty, 1, 1]], inner)
+        inner = out_at(ctx.at(it["exit_at"]) if it.get("exit_at") else None, inner, it.get("exit_dur", 0.25))
+        entrance = anim("fade-up", at, it.get("dur", 0.35), inner, ' data-shift="55"')
+        out.append(f'<g transform="translate({_r(tx)},{_r(ty)})">{entrance}</g>')
+    return "".join(out)
+
+
 KINDS = {"head": head, "claims": claims, "deck": deck, "timeline": timeline, "checklist": checklist,
-         "tally": tally, "wipe": wipe}
+         "tally": tally, "wipe": wipe, "tiles": tiles}
 
 from pipeline.board_diagrams import KINDS as DIAGRAM_KINDS  # noqa: E402
 from pipeline.board_bodies import cards as _cards  # noqa: E402

@@ -330,8 +330,53 @@ def flow(ctx, part, x, top, w, room, pad, t0):
     return "".join(out), bh + 70
 
 
+def context_stack(ctx, part, x, top, w, room, pad, t0):
+    """固定窗口里的对话条；较早条目可按词轴淡去、聚拢，保留最近一条。"""
+    items = part["items"]
+    h = part.get("h", min(room - 60, 1050))
+    inner_w, x0 = w - 2 * pad, x + pad
+    step = h / len(items)
+    row_h = step * 0.73
+    parts = []
+    collapse = _t(ctx, part, "collapse_at", None)
+    for k, it in enumerate(items):
+        at = ctx.at(it["at"])
+        last = k == len(items) - 1
+        bx = x0 + (60 if k % 2 else 0)
+        by = top + k * step + 26
+        bw = inner_w - 60
+        bg = ctx.col("accent") if last else "#FFFFFF"
+        body = f'<rect x="{bx}" y="{by}" width="{bw}" height="{row_h}" rx="24" fill="{bg}" '
+        body += f'stroke="{ctx.col("rule")}" stroke-width="{0 if last else 3}"/>'
+        if it.get("text"):
+            s = it["text"]
+            size = it.get("size", 100)
+            gt = ctx.glyphs(B.plain_of(s), it.get("text_at", it["at"]))
+            body += B.text(ctx, s, bx + 44, by + row_h / 2 + size * 0.36, size, gt,
+                           fill="#FFFFFF" if last else "muted", settle=False)
+        else:
+            for j, frac in enumerate((0.68, 0.43)):
+                body += f'<rect x="{bx + 44}" y="{by + row_h * (0.33 + j * 0.3)}" width="{bw * frac}" '
+                body += f'height="18" rx="9" fill="{ctx.col("rule")}"/>'
+        if it.get("dim_at"):
+            dt = ctx.at(it["dim_at"])
+            body = B.keys([[0, 0, 0, 1, 1], [dt, 0, 0, 1, 1], [dt + 0.35, 0, 0, 1, 0.2]], body)
+        if collapse is not None and not last:
+            target_y = top + (len(items) - 1) * step + 26
+            body = B.keys([[0, 0, 0, 1, 1], [collapse, 0, 0, 1, 1],
+                           [collapse + 0.6, 0, target_y - by, 1, 0]], body)
+        parts.append(B.anim("fade-up", at, 0.4, body, ' data-shift="35"'))
+    if part.get("window_at"):
+        at = ctx.at(part["window_at"])
+        yy = top + (len(items) - 1) * step + 8
+        parts.append(f'<rect data-anim="draw" data-delay="{_r(at)}" data-dur="0.6" x="{x0 - 18}" y="{yy}" '
+                     f'width="{inner_w + 36}" height="{row_h + 36}" rx="36" fill="none" '
+                     f'stroke="{ctx.col("accent")}" stroke-width="8"/>')
+    return "".join(parts), h + 50
+
+
 BODIES = {"terminal": terminal, "chat": chat, "dial": dial, "scan": scan, "gauges": gauges, "ring": ring,
-          "bar": bar, "flow": flow}
+          "bar": bar, "flow": flow, "context_stack": context_stack}
 
 
 # ---- 一排并列卡片（各自到点升起、一直留着） -------------------------------------------------------
