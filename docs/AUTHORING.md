@@ -102,11 +102,14 @@
 | `head` | 左上粗体小标题逐字打出，后跟绿色胶囊标签弹出，下一行灰色小字可分段出现 | `head`、`at`、`kicker`/`kicker_at`、`tag`/`tag_at`、`sub`（字符串或 `[[字, 绑词], …]`） |
 | `claims` | 说法堆叠：当前说法大字逐字出现，重点被绿色划过（底色条 + 逐字变绿）；下一句来时旧说法缩小上移成一摞；到 `strike` 时变灰并划线。`quote: true` 加引号，`*…*` 整句绿色 | `claims: [{text, at, mark, mark_at, strike, size, quote}]`、`y`、`size`、`stack_y` |
 | `deck` | 右侧卡片组：一张接一张替换（旧卡淡出上移，新卡升起；`enter` 可选 `rise`/`pop`/`drop`/`iris`）。卡内：等宽小标签、标题（右侧可配动态图标 `icon`）、内容块 | `deck: [{at, label, title, title_at, icon, icon_at, body, frame, pad, enter}]`、`x`/`y`/`w`/`h` |
-| 卡片内容 `body` | `photo`（照片缓慢推近，`bleed` 铺满卡片）、`wave`（说话声波，`at`–`until`）、`grid`（方块逐个出现，`flip` 到点变黑）、`comments`（短评论气泡逐条弹出） | 每块 `{kind, …}` |
+| 卡片内容 `body` | `photo`（照片缓慢推近，`bleed` 铺满卡片）、`wave`（说话声波，`at`–`until`）、`grid`（方块逐个出现，`flip` 到点变黑）、`comments`（短评论气泡逐条弹出）；`pipeline/board_bodies.py` 另有 `chat`（对话气泡，可描框/加注/变淡）、`dial`（表盘：说好的时长→拖满一圈）、`scan`（人一眼圈出毛病、扫描带扫过）、`gauges`（容量槽依次涨、全满变黑一震）、`ring`（注意力从一点扫满一圈）、`bar`（进度条涨或退）、`flow`（点从左框流到右框）、`terminal`（代码行依次写出） | 每块 `{kind, …}` |
+| `cards` | 一排（或一张）固定卡片，各自到点升起、一直留着，卡内同 `deck` | `cards: [卡…]`、`x`/`y`/`w`/`h`/`gap` |
 | `timeline` | 细轴画出、刻度依次弹出；节点按念到弹出，最新节点绿色呼吸；`trace` 让一个点沿轴走过去，刻度随之变绿 | `timeline: [{label, at, x, anchor, sub}]`、`y`、`trace: {from, to, at, until}` |
 | `checklist` | 清单逐条出现，每条配会动的图标（`bolt` 呼吸、`wander` 点沿弯路走、`burst` 冲击波、`math` 描线、`quote`）；绿色指示条跟着念到的那条走，旧条变淡 | `checklist: [{text, at, icon, pre, pre_at}]`、`focus` |
-| `tally` | 数字条形：条从左长出、数字滚动、单位按念到出现；有 `total` 时后面的条移上去接成一整条，总数滚动，可加扫光 | `tally: [{label, value, at, dur, unit, unit_at, number}]`、`total: {label, at, value, count_at, unit, unit_at, sweep_at}` |
+| `tally` | 数字条形：条从左长出、数字滚动、单位按念到出现；有 `total` 时后面的条移上去接成一整条，总数滚动（小标签在数字上方） | `tally: [{label, value, at, dur, unit, unit_at, number}]`、`total: {label, at, value, count_at, unit, unit_at}` |
 | `wipe` | 底色圆从一点扩大盖住整页（边上一圈细绿线），用在换段落前 | `wipe`（绑词）、`x`/`y`、`dur` |
+
+**动画放完才退场（出片时检查，不过就报错）。** 每个有限的动画（入场、描线、滚动、移动、划线……）都要在它所在的组退场（`exit_at`）、整页被 `wipe` 盖住或换页之前放完，并停够 `config.PAGE_MOTION["hold"]`（0.25 秒）；呼吸、循环流动、照片推近、声波和进度条不算。念得快放不下，就缩短动画、提前到前一个词，或换动法，不许半路切走。本人已审定、不再改的旧元素可写 `"hold_check": "warn"`，只提示不拦。一段配音一张表整段出片，不分段拼接。
 
 这些版式用到的运行时原语：`type`（`data-glyph-times` 逐字、`data-glyph-from` 由浅变深）、`keys`（关键帧移动/缩放/透明度）、`mark`（按字的位置画底色条、删除线、下划线）、`iris`（圆半径，盖页或圆形揭示）、`wave`、`shake`，以及文字的 `data-follow`（单位跟在滚动数字后面）。一期的内容写在本期 `pages\*.json`，版式不够用时在 `boards.py` 加一种（会复用的才加）。
 

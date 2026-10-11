@@ -88,3 +88,43 @@ class BoardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HoldCheckTests(unittest.TestCase):
+    def test_unfinished_animation_before_exit_is_reported(self):
+        frag = ('<g data-anim="fade-out" data-delay="2.0" data-dur="0.3">'
+                '<rect data-anim="grow-bar" data-delay="1.5" data-dur="0.6" width="10" height="10"/></g>')
+        rows = list(pages.unfinished(frag, 5.0))
+        self.assertEqual(1, len(rows))
+        self.assertEqual("grow-bar", rows[0][0])
+        ok = frag.replace('data-delay="1.5"', 'data-delay="1.0"')
+        self.assertEqual([], list(pages.unfinished(ok, 5.0)))
+
+    def test_page_end_wipe_and_ambient(self):
+        frag = ('<text data-anim="type" data-delay="0" data-dur="0.3" data-glyph-times="[0, 4.9]" '
+                'data-glyph-fade="0.14">ab</text><g data-anim="pulse" data-delay="0" data-dur="0.4"/>')
+        self.assertEqual(1, len(list(pages.unfinished(frag, 5.0))))          # 页尾前没停够
+        self.assertEqual(0, len(list(pages.unfinished(frag, 5.4))))
+        warn = '<g data-hold-check="warn">' + frag + '</g>'
+        self.assertTrue(all(r[4] for r in pages.unfinished(warn, 5.0)))     # 已审定：只提示
+        cover = '<circle data-anim="iris" data-cover="1" data-delay="3" data-dur="0.4"/>'
+        self.assertEqual(1, len(list(pages.unfinished(
+            '<rect data-anim="fade" data-delay="2.9" data-dur="0.3"/>' + cover, 5.0))))
+
+    def test_new_bodies_build(self):
+        tl = _timeline()
+        page = {"elements": [{"deck": [
+            {"at": "网上", "title": "天天用", "body": [
+                {"kind": "chat", "items": [{"side": "user", "text": "天天用", "at": "天天", "ring_at": "气到"},
+                                           {"side": "ai", "lines": 2, "at": "常常", "note": "常常", "note_at": "常常"}]},
+                {"kind": "dial", "at": "天天", "label": "天天用", "label_at": "天天", "grow_at": "常常",
+                 "label2": "气到", "label2_at": "气到"}]},
+            {"at": "光", "title": "烧了", "body": [
+                {"kind": "scan", "circle_at": "Claude", "scan_at": "烧了"},
+                {"kind": "gauges", "items": [{"label": "加上", "at": "加上"}], "full_at": "累计"},
+                {"kind": "ring", "nodes_at": "光", "narrow_at": "Claude", "wide_at": "烧了"},
+                {"kind": "bar", "at": "光", "change_at": "烧了"}, {"kind": "flow", "at": "光"},
+                {"kind": "terminal", "at": "光"}]}]},
+            {"cards": [{"at": "Codex", "title": "Codex", "icon": "laptop"}]}]}
+        frag = pages.PageBuilder(tl, page, 0.0, 0, None).build()
+        parse_fragment(frag)

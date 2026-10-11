@@ -1003,7 +1003,8 @@ def progress(n, current, frac=1.0, x=None, w=None, y=None, h=4, duration=None, s
             start = seg*max(0,min(start_frac,frac))
             if start:
                 out.append(f'<rect x="{sx:.1f}" y="{y}" width="{start:.1f}" height="{h}" fill="{th["accent"]}"/>')
-            motion = f'data-anim="wipe" data-ease="linear" data-delay="0" data-dur="{duration}" ' if duration else ""
+            motion = (f'data-anim="wipe" data-ease="linear" data-ambient="1" data-delay="0" data-dur="{duration}" '
+                      if duration else "")
             out.append(f'<rect {motion}x="{sx+start:.1f}" y="{y}" width="{seg*min(1.0, frac)-start:.1f}" height="{h}" fill="{th["accent"]}"/>')
     out.append('</g>')
     return "".join(out)

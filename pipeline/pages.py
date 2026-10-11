@@ -262,6 +262,10 @@ class PageBuilder:
             d = self.at(el.get("at"))
             self.flow_element(el, d)
         self.marks.append((el, d))
+        if el.get("hold_check") == "warn":    # 已审定的旧页：退场检查只提示，不拦出片
+            for out, first in ((self.out, before_out), (self.mout, before_media)):
+                content = "".join(out[first:]); del out[first:]
+                out.append(f'<g data-hold-check="warn">{content}</g>')
         if el.get("exit_at"):
             when = self.at(el["exit_at"])
             for out, first in ((self.out, before_out), (self.mout, before_media)):
@@ -409,6 +413,58 @@ class PageBuilder:
         return "".join(parts)
 
 
+AMBIENT = ("pulse", "float", "drift", "flow-blob", "wave", "push", "fade-out", "xfade")
+
+
+def unfinished(fragment, duration, transition=0.0, hold=None):
+    """退场前没放完的动画。返回 [(动作, 本页结束秒, 退场秒, 说明)]。
+
+    每个有限的动画（入场、描线、滚动、移动……）都要在它所在的组退场（fade-out/xfade 开始）、
+    整页被圆形擦除盖住或换页（扣掉换页淡出）之前放完，并且停够 hold 秒。持续的环境运动
+    （呼吸、漂浮、循环流动、声波、照片推近）和进度条不算。
+    """
+    import json as _json
+    from pipeline.build_scene import parse_fragment
+    hold = config.PAGE_MOTION["hold"] if hold is None else hold
+    root = parse_fragment(fragment)
+    page_end = duration - transition
+    covers = [float(n.get("data-delay", 0)) for n in root.iter() if n.get("data-cover") == "1"]
+    for n in root.iter():
+        if n.get("data-cover") == "1":
+            end = float(n.get("data-delay", 0)) + float(n.get("data-dur", 1))
+            if end > duration + 1e-3:
+                yield ("wipe", round(end, 3), round(duration, 3), "圆形擦除在换页前没盖完", False)
+    cover = min(covers) if covers else None
+    bad = []
+
+    def walk(node, exit_t, warn=False):
+        warn = warn or node.get("data-hold-check") == "warn"
+        kind = node.get("data-anim")
+        if kind in ("fade-out", "xfade"):
+            exit_t = min(exit_t, float(node.get("data-delay", 0)))
+        if kind and kind not in AMBIENT and node.get("data-ambient") != "1" and node.get("data-cover") != "1":
+            a = float(node.get("data-delay", 0))
+            if node.get("data-glyph-times"):
+                ts = [t for t in _json.loads(node.get("data-glyph-times")) if t < 9000]
+                end = (max(ts) if ts else a) + float(node.get("data-glyph-fade", 0.12))
+            elif kind == "keys":
+                end = max(k[0] for k in _json.loads(node.get("data-keys")))
+            elif kind == "shake":
+                end = a + 0.5
+            else:
+                end = a + float(node.get("data-dur", 1))
+            if end + hold > exit_t + 1e-3:
+                txt = "".join(node.itertext()).strip()[:16]
+                bad.append((kind, round(end, 3), round(exit_t, 3), txt, warn))
+        for ch in node:
+            walk(ch, exit_t, warn)
+
+    top = page_end if cover is None else min(page_end, cover)
+    for ch in root:
+        walk(ch, top if ch.get("data-cover") != "1" else page_end)
+    yield from bad
+
+
 def motion_gaps(fragment, duration, limit=None):
     """按可见主内容的动作时段找长停顿；进度条不算主内容动画。"""
     from pipeline.build_scene import parse_fragment
@@ -473,6 +529,14 @@ class Project:
         for i, (page, (t0, t1, pos)) in enumerate(zip(self.spec["pages"], self.pages)):
             progress = page.get("progress", prog)
             frag = PageBuilder(self.tl, page, t0, pos, self.base, progress, t1).build()
+            found = list(unfinished(frag, t1 - t0, config.TRANSITION_SECONDS))
+            for k, e, x, txt, _ in [f for f in found if f[4]]:
+                warnings.warn(f"page {i + 1}（已审定，只提示）: {k} 到 {t0 + e:.2f}s 才放完、{t0 + x:.2f}s 就退场“{txt}”")
+            late = [f for f in found if not f[4]]
+            if late:
+                rows = "; ".join(f"{k} 到 {t0 + e:.2f}s 才放完、{t0 + x:.2f}s 就退场“{txt}”" for k, e, x, txt, _ in late[:8])
+                raise ValueError(f"page {i + 1}: {len(late)} 个动画没放完就退场或换页（要停够 "
+                                 f"{config.PAGE_MOTION['hold']}s）：{rows}")
             for a,b in motion_gaps(frag,t1-t0):
                 warnings.warn(f"page {i+1}: main content static for {b-a:.2f}s ({t0+a:.2f}–{t0+b:.2f}s)")
             path = self.work / "scene" / f"scene_{i + 1:02d}.html"

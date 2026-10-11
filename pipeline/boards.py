@@ -322,6 +322,23 @@ def icon(ctx, name, cx, cy, size, t0):
                f"L{_r(cx + s * 1.4)},{_r(cy)} L{_r(cx + s * 1.15)},{_r(cy + s * 0.5)} L{_r(cx + s * 1.55)},{_r(cy + s * 0.5)}")
         return (draw(circ, t0, 0.7, color=ink, w=sw * 0.6) + draw(tri, t0 + 0.25, 0.6) + draw(arc, t0 + 0.75, 0.3)
                 + draw(sig, t0 + 0.55, 0.5, color=ink, w=sw * 0.8))
+    if name == "phone":
+        w_, h_ = r * 0.95, r * 1.6
+        body = (f"M{_r(cx - w_ / 2 + 18)},{_r(cy - h_ / 2)} L{_r(cx + w_ / 2 - 18)},{_r(cy - h_ / 2)} "
+                f"Q{_r(cx + w_ / 2)},{_r(cy - h_ / 2)} {_r(cx + w_ / 2)},{_r(cy - h_ / 2 + 18)} "
+                f"L{_r(cx + w_ / 2)},{_r(cy + h_ / 2 - 18)} Q{_r(cx + w_ / 2)},{_r(cy + h_ / 2)} "
+                f"{_r(cx + w_ / 2 - 18)},{_r(cy + h_ / 2)} L{_r(cx - w_ / 2 + 18)},{_r(cy + h_ / 2)} "
+                f"Q{_r(cx - w_ / 2)},{_r(cy + h_ / 2)} {_r(cx - w_ / 2)},{_r(cy + h_ / 2 - 18)} "
+                f"L{_r(cx - w_ / 2)},{_r(cy - h_ / 2 + 18)} Q{_r(cx - w_ / 2)},{_r(cy - h_ / 2)} "
+                f"{_r(cx - w_ / 2 + 18)},{_r(cy - h_ / 2)} Z")
+        btn = f"M{_r(cx - r * 0.15)},{_r(cy + h_ / 2 - r * 0.2)} L{_r(cx + r * 0.15)},{_r(cy + h_ / 2 - r * 0.2)}"
+        return draw(body, t0, 0.55, color=ink, w=sw * 0.8) + draw(btn, t0 + 0.45, 0.2)
+    if name == "laptop":
+        w_, h_ = r * 1.5, r * 0.95
+        scr = (f"M{_r(cx - w_ / 2)},{_r(cy + h_ / 2 - 10)} L{_r(cx - w_ / 2)},{_r(cy - h_ / 2)} "
+               f"L{_r(cx + w_ / 2)},{_r(cy - h_ / 2)} L{_r(cx + w_ / 2)},{_r(cy + h_ / 2 - 10)}")
+        base = f"M{_r(cx - w_ / 2 - r * 0.25)},{_r(cy + h_ / 2)} L{_r(cx + w_ / 2 + r * 0.25)},{_r(cy + h_ / 2)}"
+        return draw(scr, t0, 0.5, color=ink, w=sw * 0.8) + draw(base, t0 + 0.35, 0.3)
     if name == "quote":
         return anim("pop", t0, 0.45,
                     f'<text x="{_r(cx)}" y="{_r(cy + size * 0.42)}" text-anchor="middle" font-size="{_r(size * 1.3)}" '
@@ -485,6 +502,9 @@ def body_part(ctx, part, x, top, w, room, pad, t0, cid):
             out.append(f'<g transform="rotate({rot} {_r(ox + cw / 2)} {_r(oy + rowh / 2)})">'
                        f'{anim("pop", ta, 0.45, bub)}</g>')
         return "".join(out), len(part["items"]) * (rowh + 28)
+    from pipeline.board_bodies import BODIES
+    if kind in BODIES:
+        return BODIES[kind](ctx, part, x, top, w, room, pad, t0)
     raise ValueError(f"unknown card body kind {kind!r}")
 
 
@@ -569,6 +589,10 @@ def checklist(ctx, el):
         row = []
         if it.get("icon"):
             row.append(icon(ctx, it["icon"], x + isz / 2, ry - size * 0.36, isz, t))
+        elif el.get("index"):        # 编号代替图标：轮到这一条时先出编号，字按念到出现
+            num = f"{k + 1:02d}"
+            row.append(text(ctx, num, x, ry, round(size * 0.62), [round(focus[k] + 0.05 * i, 3) for i in range(2)],
+                            font="mono", weight=700, fill="accent", settle=False))
         g = ctx.glyphs(plain_of(it["text"]), it["at"])
         row.append(text(ctx, it["text"], tx, ry, size, g))
         if it.get("pre"):
@@ -577,6 +601,9 @@ def checklist(ctx, el):
                             settle=False))
         dim = focus[k + 1] if k + 1 < len(focus) else None
         track = [[0, 0, 0, 1, 1]] if dim is None else [[0, 0, 0, 1, 1], [dim, 0, 0, 1, 1], [dim + 0.35, 0, 0, 1, 0.38]]
+        if el.get("all_at") and dim is not None:     # 最后一齐点亮（例如“这些”）
+            back = ctx.at(el["all_at"]) + 0.04 * k
+            track += [[back, 0, 0, 1, 0.38], [back + 0.35, 0, 0, 1, 1]]
         out.append(keys(track, "".join(row)))
     # 指示条
     bar_h = size * 1.25
@@ -650,29 +677,19 @@ def tally(ctx, el):
         v = float(total["value"])
         dec = total.get("decimals", 0 if v.is_integer() else 1)
         size = total.get("size", 230)
-        ny = y - 90
+        ny = y - 70                                   # 总数基线：压在合并后的整条上方
+        nx = x + lw
         lt = ctx.glyphs(total["label"], total["at"])
-        out.append(text(ctx, total["label"], x, ny, 84, lt, font="sans", weight=700, fill="muted"))
+        out.append(text(ctx, total["label"], nx, ny - size * 0.86, 60, lt, font="mono", weight=700, fill="muted",
+                        ls=6, settle=False))
         tid = _id("total")
         out.append(f'<text id="{tid}" data-anim="count" data-delay="{_r(ct)}" data-dur="{_r(dur)}" data-to="{v}" '
-                   f'data-decimals="{dec}" x="{x + lw}" y="{ny}" font-family="{esc(ctx.font("heavy"))}" '
+                   f'data-decimals="{dec}" x="{nx}" y="{ny}" font-family="{esc(ctx.font("heavy"))}" '
                    f'font-size="{size}" font-weight="900" fill="{a}">0</text>')
         if total.get("unit"):
             ut = ctx.glyphs(total["unit"], total.get("unit_at"), start=None if total.get("unit_at") else ct + dur)
-            out.append(text(ctx, total["unit"], x + lw, ny, 120, ut, font="heavy", weight=900, fill="accent",
-                            follow=tid, gap=30))
-        # 合并后整条上方的括线
-        br = (f"M{x + lw},{y - 40} L{x + lw},{y - 22} L{x + lw + W},{y - 22} L{x + lw + W},{y - 40}")
-        out.append(f'<path data-anim="draw" data-delay="{_r(merge + 0.5)}" data-dur="0.6" d="{br}" fill="none" '
-                   f'stroke="{a}" stroke-width="6" stroke-linejoin="round"/>')
-        if total.get("sweep_at"):
-            st = ctx.at(total["sweep_at"])
-            sw = _id("sw")
-            out.append(f'<defs><linearGradient id="{sw}" x1="0" x2="1"><stop offset="0" stop-color="#FFFFFF" '
-                       f'stop-opacity="0"/><stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.55"/>'
-                       f'<stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient></defs>'
-                       f'<rect data-anim="highlight-sweep" data-mode="pass" data-delay="{_r(st)}" data-dur="0.9" '
-                       f'x="{x + lw}" y="{y}" width="{_r(W)}" height="{bh}" fill="url(#{sw})"/>')
+            out.append(text(ctx, total["unit"], nx, ny, round(size * 0.5), ut, font="heavy", weight=900,
+                            fill="accent", follow=tid, gap=30))
     return "".join(out)
 
 
@@ -684,7 +701,7 @@ def wipe(ctx, el):
     cx, cy = el.get("x", 1920), el.get("y", 1080)
     dur = el.get("dur", 0.4)
     r1 = math.hypot(max(cx, config.WIDTH - cx), max(cy, config.HEIGHT - cy)) + 40
-    return (f'<circle data-anim="iris" data-delay="{_r(t)}" data-dur="{_r(dur)}" data-r0="0" data-r1="{_r(r1)}" '
+    return (f'<circle data-anim="iris" data-cover="1" data-delay="{_r(t)}" data-dur="{_r(dur)}" data-r0="0" data-r1="{_r(r1)}" '
             f'cx="{cx}" cy="{cy}" r="0" fill="{ctx.col("page")}" fill-opacity="0.99" stroke="{ctx.col("accent")}" '
             f'stroke-width="10"/>')   # 0.99：盖满整页时截图仍带透明通道，编码不换格式
 
@@ -692,5 +709,7 @@ def wipe(ctx, el):
 KINDS = {"head": head, "claims": claims, "deck": deck, "timeline": timeline, "checklist": checklist,
          "tally": tally, "wipe": wipe}
 
-from pipeline.board_diagrams import KINDS as DIAGRAM_KINDS
+from pipeline.board_diagrams import KINDS as DIAGRAM_KINDS  # noqa: E402
+from pipeline.board_bodies import cards as _cards  # noqa: E402
 KINDS.update(DIAGRAM_KINDS)
+KINDS["cards"] = _cards
