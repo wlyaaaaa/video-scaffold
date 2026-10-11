@@ -269,6 +269,8 @@ class PageBuilder:
 
     def glyph_times(self, s, delay):
         """逐字词轴。原文逐字揭示；概括标题必须显式绑一个已念到的词。"""
+        if self.options.get("summary"):
+            return None
         plain = "".join(t for t, _ in markup(s))
         if self.options.get('summary'):
             return None

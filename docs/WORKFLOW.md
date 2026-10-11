@@ -104,7 +104,7 @@ python -m pipeline.page_compare snapshot <影片/pages目录> <证据/之后.jso
 python -m pipeline.page_compare compare <证据/之前.json> <证据/之后.json> <证据/差异.json>
 ```
 
-快照生成完整页和每元素片段，逐字节比较并报告页、元素；不把无法识别的元素算作相同。旧基线缺新版式时，再对照各段实际出片分支的片段。选填的 `rail.replay`、`chat.text_with_bubble`、`level.compact_veil` 等用于复现明确选过的效果，不偷偷改全部旧页。
+快照默认扫描目录里的分镜表，也可在命令末尾明确列出本期已通过的表名（避免把旧版本一起纳入）。快照生成完整页和每元素片段，逐字节比较并报告页、元素；不把无法识别的元素算作相同。旧基线缺新版式时，再对照各段实际出片分支的片段。选填的 `rail.replay`、`chat.text_with_bubble`、`level.compact_veil` 等用于复现明确选过的效果，不偷偷改全部旧页。
 
 ### 版式一览
 

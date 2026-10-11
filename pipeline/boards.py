@@ -60,7 +60,8 @@ class Ctx:
         summary = summary or b.options.get("summary", False)
         def finish(times):
             record = getattr(b, 'record_glyphs', None)
-            return record(plain, cue, start, summary or not search, times) if record else times
+            return record(plain, cue, t0 if not search else start, summary, times,
+                          replay=not search and not summary) if record else times
         t0 = start if start is not None else self.at(cue)
         idx = -1
         core = plain.strip("“”\"「」 ")

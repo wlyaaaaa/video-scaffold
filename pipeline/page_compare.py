@@ -1,6 +1,6 @@
 """逐页生成确定性的 SVG 片段并比较；不出片、不写影片目录。
 
-python -m pipeline.page_compare snapshot <pages目录> <快照.json>
+python -m pipeline.page_compare snapshot <pages目录> <快照.json> [表名.json ...]
 python -m pipeline.page_compare compare <基准.json> <当前.json> <差异.json>
 基线不认识的元素单独报告为 unavailable，不冒充通过。
 """
@@ -15,11 +15,13 @@ import v2lib as L
 import config
 
 
-def snapshot(directory):
+def snapshot(directory, names=None):
     result = {}
-    paths = [Path(directory) / n for n in ["s1.json"] + [f"seg{i:02}.json" for i in range(2, 11)]]
+    paths = [Path(directory) / n for n in names] if names else sorted(Path(directory).glob("*.json"))
     for path in paths:
         spec = pages._read_json(path)
+        if not isinstance(spec, dict) or "pages" not in spec or "narration" not in spec:
+            continue
         L.use_theme(spec.get("theme", "white-green"))
         tl = pages.load_timeline(spec, path.parent)
         records = []
@@ -37,6 +39,8 @@ def snapshot(directory):
                                   for i, el in enumerate(page["elements"])]
             records.append(record)
         result[path.name] = records
+    if not result:
+        raise ValueError("没有找到图文页分镜表")
     return result
 
 
@@ -71,10 +75,13 @@ def compare(before, after):
 
 def main(argv=None):
     args = sys.argv[1:] if argv is None else argv
+    if not args:
+        print(__doc__)
+        return 2
     if args[0] == "snapshot":
         output = Path(args[2]).resolve()
         config.DIR_ASSETS = str(output.parent / "compare-assets")
-        data = snapshot(args[1])
+        data = snapshot(args[1], args[3:] or None)
     elif args[0] == "compare":
         data = compare(pages._read_json(args[1]), pages._read_json(args[2]))
         output = Path(args[3])
@@ -84,7 +91,7 @@ def main(argv=None):
         raise ValueError(__doc__)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    return int(bool(data.get("changes")))
+    return int(data.get("equal") is False)
 
 
 if __name__ == "__main__":

@@ -73,6 +73,12 @@ class PageGuardsTests(unittest.TestCase):
             self.assertEqual([], list(pages.early_glyphs(b.validation_fragment, b)))
         b = pages.PageBuilder(tl, {'elements': [el]}, 0, 0, None)
         self.assertEqual([], list(pages.early_glyphs(b.build(), b)))
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self.project(tmp, timeline('甲乙', 1), [{'title': '乙', 'at': '甲', 'summary': True}])
+            p.plan()  # 原文里的字也可以被显式声明为概括，保持只读。
+            p = self.project(tmp, timeline('甲乙'), [{'tiles': [{'title': '乙', 'at': '甲', 'replay': True}]}])
+            with self.assertRaisesRegex(ValueError, '重现文字.*尚未完整念过'):
+                p.plan()
 
     def test_plan_does_not_generate_background_or_decode_screen(self):
         from pipeline import board_diagrams
