@@ -732,7 +732,127 @@ def screen(ctx, el):
     return B.anim("fade-up", t_in, 0.55, body, ' data-shift="80"')
 
 
+def _link_icon(ctx, name, cx, cy, r, at):
+    """简介行的小图标：globe 地球、code 代码尖括号、play 播放；线条依次描出。"""
+    if name == "globe":
+        d = [f"M{cx + r:g},{cy:g} A{r:g},{r:g} 0 1 1 {cx + r - .01:g},{cy - .5:g}",
+             f"M{cx:g},{cy - r:g} C{cx + r * .62:g},{cy - r * .5:g} {cx + r * .62:g},{cy + r * .5:g} {cx:g},{cy + r:g} "
+             f"C{cx - r * .62:g},{cy + r * .5:g} {cx - r * .62:g},{cy - r * .5:g} {cx:g},{cy - r:g}",
+             f"M{cx - r:g},{cy:g} L{cx + r:g},{cy:g}"]
+    elif name == "code":
+        d = [f"M{cx - r * .35:g},{cy - r * .6:g} L{cx - r:g},{cy:g} L{cx - r * .35:g},{cy + r * .6:g}",
+             f"M{cx + r * .35:g},{cy - r * .6:g} L{cx + r:g},{cy:g} L{cx + r * .35:g},{cy + r * .6:g}",
+             f"M{cx + r * .18:g},{cy - r * .8:g} L{cx - r * .18:g},{cy + r * .8:g}"]
+    elif name == "play":
+        d = [f"M{cx - r * .5:g},{cy - r * .75:g} L{cx + r * .8:g},{cy:g} L{cx - r * .5:g},{cy + r * .75:g} Z"]
+    else:
+        raise ValueError(f"unknown link icon {name!r}")
+    return "".join(line(ctx, p, at + .12 * k, .45, color="accent" if k == 0 else "ink", sw=max(6, r / 7))
+                   for k, p in enumerate(d))
+
+
+def desc_links(ctx, el):
+    """“地址在简介里”：简介框里一行一个去处（图标 + 名称 + 打码的地址条，不写真实地址）；
+    `point_at` 时框描绿、下方箭头指向简介。"""
+    rows = el["desc_links"]
+    x, y, w = el.get("x", 2100), el.get("y", 620), el.get("w", 1400)
+    a, rule, faint = ctx.col("accent"), ctx.col("rule"), ctx.col("faint")
+    t0 = ctx.at(el["at"]) if el.get("at") else ctx.at(rows[0]["at"])
+    rh, head_h = el.get("row_h", 220), 170
+    h = head_h + len(rows) * rh + 30
+    out = [B.anim("fade-up", t0, .45, rect(x, y, w, h, "#FFFFFF", radius=36, stroke=rule), ' data-shift="60"')]
+    title = el.get("title", "简介")
+    tg = ctx.glyphs(title, el.get("title_at"), start=None if el.get("title_at") else t0 + .1)
+    out.append(B.text(ctx, title, x + 80, y + 118, 64, tg, font="mono", weight=700, fill="muted", ls=6, settle=False))
+    out.append(line(ctx, f"M{x + 80:g},{y + head_h - 6:g} L{x + w - 80:g},{y + head_h - 6:g}", t0 + .2, .5,
+                    color="rule", sw=4))
+    for k, r in enumerate(rows):
+        ry = y + head_h + k * rh + rh / 2
+        ta = ctx.at(r["at"])
+        out.append(_link_icon(ctx, r.get("icon", "globe"), x + 150, ry, 62, ta))
+        out.append(label(ctx, r["label"], r["at"], x + 270, ry - 6, r.get("size", 88), font="sans", weight=800))
+        bw = (w - 350) * r.get("w", .78)
+        out.append(f'<rect data-anim="grow-bar" data-delay="{ta + .2:.4f}" data-dur="0.5" x="{x + 270:g}" '
+                   f'y="{ry + 40:g}" width="{bw:g}" height="38" rx="19" fill="{faint}" fill-opacity="0.55"/>')
+    if el.get("point_at"):
+        pa = ctx.at(el["point_at"])
+        out.append(rect(x - 10, y - 10, w + 20, h + 20, "none", radius=44, stroke=a, sw=8,
+                        extra=f' data-anim="draw" data-delay="{pa:.4f}" data-dur="0.5"'))
+        ax = x + w / 2
+        out.append(line(ctx, f"M{ax:g},{y + h + 50:g} L{ax:g},{y + h + 250:g}", pa + .1, .35, sw=14))
+        out.append(line(ctx, f"M{ax - 60:g},{y + h + 190:g} L{ax:g},{y + h + 250:g} L{ax + 60:g},{y + h + 190:g}",
+                        pa + .4, .25, sw=14))
+    return "".join(out)
+
+
+def _sanlian_shape(ctx, k, f, *, fill=None, stroke=None, sw=5):
+    """点赞（竖拇指）、投币（硬币）、收藏（星）三个图形；局部坐标约 ±45，再按 f 缩放。"""
+    st = f' stroke="{stroke}" stroke-width="{sw}" stroke-linejoin="round" stroke-linecap="round"' if stroke else ""
+    fl = fill or "none"
+    if k == 0:
+        return (f'<path d="M-40,-4 L-24,-4 L-24,38 L-40,38 Z M-16,-4 L2,-38 C7,-47 20,-44 17,-31 L13,-13 L34,-13 '
+                f'C45,-13 49,-4 47,4 L41,31 C39,37 35,38 29,38 L-16,38 Z" fill="{fl}"{st}/>')
+    if k == 1:
+        inner = "#FFFFFF" if fill else (stroke or fl)
+        return (f'<circle r="42" fill="{fl}"{st}/><circle r="29" fill="none" stroke="{inner}" stroke-width="{sw}"/>'
+                f'<text y="15" text-anchor="middle" font-family="{B.esc(ctx.font("heavy"))}" font-size="40" '
+                f'font-weight="900" fill="{inner}">币</text>')
+    pts = []
+    for i in range(10):
+        ang = -math.pi / 2 + i * math.pi / 5
+        rr = 46 if i % 2 == 0 else 19
+        pts.append(f"{rr * math.cos(ang):.1f},{rr * math.sin(ang) + 3:.1f}")
+    return f'<polygon points="{" ".join(pts)}" fill="{fl}"{st}/>'
+
+
+def sanlian(ctx, el):
+    """一键三连：点赞、投币、收藏三枚图标弹出，外圈一起“长按蓄力”描满，同时点亮并冲击波；
+    `follow_at` 时下面弹出“+ 关注”按钮，随即变成“已关注”。"""
+    cfg = el["sanlian"]
+    cx, cy = el.get("x", 2800), el.get("y", 900)
+    gap, s = el.get("gap", 430), el.get("size", 120)
+    a, ink, rule, muted = ctx.col("accent"), ctx.col("ink"), ctx.col("rule"), ctx.col("muted")
+    t = ctx.at(cfg.get("at") or el["at"])
+    charge = cfg.get("charge", .7)
+    lit = t + .2 + charge
+    f = s / 50
+    labels = cfg.get("labels", ["点赞", "投币", "收藏"])
+    out = []
+    for k in range(3):
+        x = cx + (k - 1) * gap
+        g0 = t + .08 * k
+        base = (circle(0, 0, s * 1.05, "#FFFFFF", stroke=rule, sw=5)
+                + f'<g transform="scale({f:g})">{_sanlian_shape(ctx, k, f, stroke=muted, sw=5)}</g>')
+        out.append(f'<g transform="translate({x:g},{cy:g})">{B.anim("pop", g0, .4, base)}</g>')
+        out.append(f'<g transform="translate({x:g},{cy:g}) rotate(-90)"><circle data-anim="draw" data-ease="in-out" '
+                   f'data-delay="{t + .2:.4f}" data-dur="{charge:g}" r="{s * 1.24:g}" fill="none" stroke="{a}" '
+                   f'stroke-width="{max(8, s / 10):g}" stroke-linecap="round"/></g>')
+        on = (circle(0, 0, s * 1.05, a, extra=' fill-opacity="0.12"')
+              + f'<g transform="scale({f:g})">{_sanlian_shape(ctx, k, f, fill=a)}</g>')
+        out.append(f'<g transform="translate({x:g},{cy:g})">{B.anim("pop", lit, .35, on)}</g>')
+        out.append(f'<g transform="translate({x:g},{cy:g})"><circle data-anim="shockwave" data-delay="{lit:.4f}" '
+                   f'data-dur="0.7" data-max="2.2" r="{s * .7:g}" fill="none" stroke="{a}" stroke-width="6"/></g>')
+        lab = labels[k]
+        out.append(B.text(ctx, lab, x, cy + s * 1.24 + 120, 64,
+                          [round(g0 + .15 + B.TYPE_STEP * i, 4) for i in range(len(lab))],
+                          font="sans", weight=700, fill="muted", anchor="middle", settle=False))
+    if cfg.get("follow_at"):
+        fa = ctx.at(cfg["follow_at"])
+        bw, bh = el.get("button_w", 620), 170
+        bx, by = cx - bw / 2, cy + s * 1.24 + 260
+        font = B.esc(ctx.font("heavy"))
+        btn = (rect(bx, by, bw, bh, ink, radius=bh / 2)
+               + f'<text x="{cx:g}" y="{by + bh / 2 + 30:g}" text-anchor="middle" font-family="{font}" '
+                 f'font-size="84" font-weight="900" fill="#FFFFFF">{B.esc(cfg.get("follow", "+ 关注"))}</text>')
+        done = (rect(bx, by, bw, bh, "#FFFFFF", radius=bh / 2, stroke=a, sw=8)
+                + f'<text x="{cx:g}" y="{by + bh / 2 + 30:g}" text-anchor="middle" font-family="{font}" '
+                  f'font-size="84" font-weight="900" fill="{a}">{B.esc(cfg.get("followed", "已关注"))}</text>')
+        out.append(B.anim("pop", fa, .4, btn))
+        out.append(B.anim("fade", fa + .6, .25, done))
+    return "".join(out)
+
+
 KINDS = {"screenshot": screenshot_stamp, "repeat_flow": repeat_flow, "focus_network": focus_network,
          "time_stretch": time_stretch, "scan_grid": scan_grid, "capacity_gauges": capacity_gauges,
          "device_flow": device_flow, "condense": condense, "cross_check": cross_check, "lanes": lanes,
-         "rail": rail, "screen": screen}
+         "rail": rail, "screen": screen, "desc_links": desc_links, "sanlian": sanlian}

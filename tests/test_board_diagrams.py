@@ -77,6 +77,21 @@ class DiagramTests(unittest.TestCase):
             self.assertEqual(src.read_bytes(), original)
             self.assertFalse(any(el.tag.endswith("clipPath") for el in root.iter()))
 
+    def test_outro_boards_hide_addresses_and_finish(self):
+        """简介框只画打码条、不写地址；三连和关注按词轴放完；swap 图标能画。"""
+        frag = self.build([
+            {"desc_links": [{"label": "清手机", "icon": "globe", "at": "清手机"},
+                            {"label": "换电脑", "icon": "code", "at": "换电脑"}],
+             "at": "清手机", "point_at": "真用过"},
+            {"sanlian": {"at": "注意力", "follow_at": "更全面"}, "at": "注意力"},
+            {"checklist": [{"text": "流量", "at": "流量", "icon": "swap"}]},
+        ], end=self.tl.duration)
+        root = parse_fragment(frag)
+        words = "".join("".join(el.itertext()) for el in root.iter() if el.tag.endswith("text"))
+        self.assertNotIn("http", words)
+        self.assertIn("已关注", words)
+        self.assertEqual([], [r for r in pages.unfinished(frag, self.tl.duration) if not r[4]])
+
     def test_hub_is_above_connections(self):
         root = parse_fragment(self.build([{"focus_network": {"center": "注意力", "nodes": [{}, {}],
                 "expand_at": "更全面"}, "at": "注意力"}]))

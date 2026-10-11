@@ -394,6 +394,15 @@ def icon(ctx, name, cx, cy, size, t0):
              f"A{_r(bw_ * 0.32)},{_r(bw_ * 0.32)} 0 0 1 {_r(cx + bw_ * 0.32)},{_r(cy - r * 0.45)} "
              f"L{_r(cx + bw_ * 0.32)},{_r(cy - bh_ * 0.2)}")
         return draw(d, t0 + 0.15, 0.35, color=a, w=sw * 1.3) + body
+    if name == "swap":     # 换一家：上箭头向右（绿）、下箭头向左（黑），依次描出
+        s = r * 0.6
+        top = (f"M{_r(cx - s)},{_r(cy - s * 0.4)} L{_r(cx + s)},{_r(cy - s * 0.4)} "
+               f"M{_r(cx + s * 0.5)},{_r(cy - s * 0.85)} L{_r(cx + s)},{_r(cy - s * 0.4)} "
+               f"L{_r(cx + s * 0.5)},{_r(cy + s * 0.05)}")
+        bot = (f"M{_r(cx + s)},{_r(cy + s * 0.4)} L{_r(cx - s)},{_r(cy + s * 0.4)} "
+               f"M{_r(cx - s * 0.5)},{_r(cy - s * 0.05)} L{_r(cx - s)},{_r(cy + s * 0.4)} "
+               f"L{_r(cx - s * 0.5)},{_r(cy + s * 0.85)}")
+        return ring + draw(top, t0 + 0.1, 0.4) + draw(bot, t0 + 0.35, 0.4, color=ink)
     raise ValueError(f"unknown icon {name!r}")
 
 
