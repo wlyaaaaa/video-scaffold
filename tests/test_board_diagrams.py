@@ -91,6 +91,61 @@ class DiagramTests(unittest.TestCase):
             self.assertAlmostEqual(progress.call_args.args[2], .71)
             self.assertAlmostEqual(progress.call_args.kwargs["start_frac"], .42)
 
+    def test_review_diagrams_keep_spoken_text_on_time_and_finish(self):
+        """摘要压缩、对照核对、并行轨道、进度轨和卡片里的细看/任务单/水位条：原文字不早出，动画能放完。"""
+        elements = [
+            {"condense": {"rows": [{"at": "同一个要求", "user": True}, {"at": "说了"},
+                                   {"at": "好几遍", "user": True, "keep": True}],
+                          "collapse_at": "还是照旧", "summary_label": "最后一句", "stamp": {"text": "AI", "at": "真正"},
+                          "worker": {"at": "真正要的", "label": "真正要的"}, "keep_at": "一个小时"}, "at": "同一个要求"},
+            {"cross_check": {"left_label": "最后一句", "right_label": "真正要的",
+                             "checker": {"label": "AI", "at": "最后一句"},
+                             "rows": [{"at": "最后一句", "status": "ok"},
+                                      {"at": "真正", "status": "missing", "status_at": "毛病", "note": "看不出来",
+                                       "restore_at": "全打满"},
+                                      {"at": "要的", "status": "changed", "status_at": "幻觉", "note": "开始幻觉"}]},
+             "at": "最后一句"},
+            {"lanes": {"lanes": [{"label": "流量", "at": "流量"}, {"label": "内存", "at": "内存"}],
+                       "spawn": {"at": "内存", "node_text": "AI"}}, "at": "流量"},
+            {"rail": [{"label": "清手机", "at": "清手机"}, "换电脑", "真用过"], "current": 0, "at": "清手机"},
+            {"deck": [{"at": "毛病", "title": "看不出来", "body": [
+                {"kind": "inspect", "rows": 3, "at": "毛病", "tick_at": "看不出来", "lens_at": "开始幻觉",
+                 "wrong_at": "流量"},
+                {"kind": "todo", "items": [{"text": "全打满", "at": "全打满", "tick_at": "注意力"},
+                                           {"at": "流量", "absent": True, "ghost_at": "内存", "restore_at": "磁盘"}]},
+                {"kind": "level", "steps": [["流量", .5], ["内存", .9, .4]], "limit": .9, "hit_at": "磁盘",
+                 "blind_at": "全打满"}]}]},
+        ]
+        frag = self.build(elements, end=self.tl.duration)
+        root = parse_fragment(frag)
+        for el in root.iter():
+            txt = "".join(el.itertext())
+            if not el.get("data-glyph-times") or TEXT.find(txt) < 0:
+                continue
+            idx = TEXT.find(txt)
+            for k, at in enumerate(json.loads(el.get("data-glyph-times"))):
+                ct = self.tl.char_time(idx + k)
+                if ct is not None:
+                    self.assertGreaterEqual(at + 1e-6, ct, txt)
+        late = [f for f in pages.unfinished(frag, self.tl.duration + 2) if not f[4]]
+        self.assertEqual(late, [])
+
+    def test_condense_kept_rows_wait_for_their_word(self):
+        """挑中留进摘要的那几条，也要念到它才进来，不能一开页就挂在画面上。"""
+        frag = self.build([{"condense": {"rows": [{"at": "同一个要求", "user": True},
+                                                  {"at": "一整天", "user": True, "keep": True}],
+                                         "collapse_at": "毛病",
+                                         "worker": {"at": "看不出来", "label": "看不出来", "below": True}},
+                            "at": "同一个要求"}])
+        ins = [float(n.get("data-delay")) for n in parse_fragment(frag).iter() if n.get("data-anim") == "fade-up"]
+        self.assertEqual(len(ins), 2)
+        self.assertAlmostEqual(max(ins), pages.cue_time(self.tl, "一整天", 0)[0], places=3)
+
+    def test_rail_hides_labels_of_steps_not_reached(self):
+        frag = self.build([{"rail": ["清手机", "换电脑", "真用过"], "current": 1, "at": "换电脑"}])
+        shown = ["".join(el.itertext()) for el in parse_fragment(frag).iter() if el.get("data-glyph-times")]
+        self.assertEqual(shown, ["清手机", "换电脑"])
+
     def test_bad_time_range_fails(self):
         with self.assertRaises(ValueError):
             self.build([{"time_stretch": {"start_label": "一个小时", "stretch_at": "一整天",

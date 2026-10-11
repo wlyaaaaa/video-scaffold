@@ -375,8 +375,207 @@ def context_stack(ctx, part, x, top, w, room, pad, t0):
     return "".join(parts), h + 50
 
 
+def _tick(ctx, cx, cy, s, at, dur=0.3, sw=12):
+    d = f"M{_r(cx - s * 0.45)},{_r(cy)} L{_r(cx - s * 0.12)},{_r(cy + s * 0.32)} L{_r(cx + s * 0.5)},{_r(cy - s * 0.36)}"
+    return (f'<path data-anim="draw" data-delay="{_r(at)}" data-dur="{_r(dur)}" d="{d}" fill="none" '
+            f'stroke="{ctx.col("accent")}" stroke-width="{sw}" stroke-linecap="round" stroke-linejoin="round"/>')
+
+
+def _cross(ctx, cx, cy, s, at, sw=12):
+    a, b = (f"M{_r(cx - s / 2)},{_r(cy - s / 2)} L{_r(cx + s / 2)},{_r(cy + s / 2)}",
+            f"M{_r(cx + s / 2)},{_r(cy - s / 2)} L{_r(cx - s / 2)},{_r(cy + s / 2)}")
+    return "".join(f'<path data-anim="draw" data-delay="{_r(at + k * 0.12)}" data-dur="0.2" d="{d}" fill="none" '
+                   f'stroke="{ctx.col("ink")}" stroke-width="{sw}" stroke-linecap="round"/>' for k, d in enumerate((a, b)))
+
+
+# ---- 细看：一排排看着都对（逐行打勾），放大镜移到其中一行，那一行原来不对 -------------------------------
+def inspect(ctx, part, x, top, w, room, pad, t0):
+    block, ink = ctx.col("block"), ctx.col("ink")
+    n = part.get("rows", 5)
+    rh, gap = part.get("row_h", 44), part.get("gap", 46)
+    widths = part.get("widths") or [0.88, 0.72, 0.94, 0.62, 0.82, 0.7][:n]
+    x0, iw = x + pad, w - 2 * pad - 150
+    at = _t(ctx, part, "at", t0 + 0.2)
+    tick_at = _t(ctx, part, "tick_at", None)
+    wrong_at = _t(ctx, part, "wrong_at", None)
+    k_bad = part.get("target", 2)
+    rows, bad_layer, bad_strike = [], "", ""
+    for k, wf in enumerate(widths):
+        ry = top + 40 + k * (rh + gap)
+        bar_ = (f'<rect data-anim="wipe" data-dir="left" data-delay="{_r(at + 0.07 * k)}" data-dur="0.35" '
+                f'x="{_r(x0)}" y="{_r(ry)}" width="{_r(iw * wf)}" height="{rh}" rx="{rh / 2}" fill="{block}"/>')
+        tick = _tick(ctx, x0 + iw + 80, ry + rh / 2, rh * 1.2, tick_at + 0.09 * k) if tick_at is not None else ""
+        if k == k_bad and wrong_at is not None:
+            tick = B.out_at(wrong_at, tick, 0.2)
+            bad_strike = (f'<path data-anim="draw" data-delay="{_r(wrong_at + 0.1)}" data-dur="0.3" '
+                          f'd="M{_r(x0 - 10)},{_r(ry + rh / 2)} L{_r(x0 + iw * wf + 10)},{_r(ry + rh / 2)}" '
+                          f'stroke="{ink}" stroke-width="10" stroke-linecap="round"/>')
+            bad_layer = bad_strike + _cross(ctx, x0 + iw + 80, ry + rh / 2, rh * 1.1, wrong_at + 0.15)
+        if k == k_bad:
+            bad_bar = f'<rect x="{_r(x0)}" y="{_r(ry)}" width="{_r(iw * wf)}" height="{rh}" rx="{rh / 2}" fill="{block}"/>'
+        rows.append(bar_ + tick)
+    out = rows + [bad_layer]
+    lens_at = _t(ctx, part, "lens_at", None)
+    if lens_at is not None:
+        ry = top + 40 + k_bad * (rh + gap) + rh / 2
+        lx, R = x0 + iw * part.get("lens_x", 0.55), part.get("lens_r", 150)
+        clip = B._id("lens")
+        zoom = part.get("zoom", 1.7)
+        mag = (f'<defs><clipPath id="{clip}"><circle cx="{_r(lx)}" cy="{_r(ry)}" r="{R - 6}"/></clipPath></defs>'
+               f'<g clip-path="url(#{clip})">' + B.anim(
+                   "fade", lens_at + 0.5, 0.2,
+                   f'<circle cx="{_r(lx)}" cy="{_r(ry)}" r="{R}" fill="#FFFFFF"/>'
+                   f'<g transform="translate({_r(lx)},{_r(ry)}) scale({zoom}) translate({_r(-lx)},{_r(-ry)})">'
+                   f'{bad_bar}{bad_strike}</g>') + '</g>')    # 镜里只放大那一行，右侧的叉不进镜（放大后会出画）
+        glass = (f'<circle cx="{_r(lx)}" cy="{_r(ry)}" r="{R}" fill="none" stroke="{ink}" stroke-width="16"/>'
+                 f'<path d="M{_r(lx + R * 0.72)},{_r(ry + R * 0.72)} L{_r(lx + R * 1.45)},{_r(ry + R * 1.45)}" '
+                 f'stroke="{ink}" stroke-width="34" stroke-linecap="round"/>')
+        track = [[0, 520, 260, 1, 0], [lens_at, 520, 260, 1, 0], [lens_at + 0.1, 470, 230, 1, 1],
+                 [lens_at + 0.55, 0, 0, 1, 1]]
+        out.append(B.keys(track, mag + glass))
+        if part.get("lens_label"):
+            g = ctx.glyphs(part["lens_label"], part.get("lens_label_at"), start=None if part.get("lens_label_at") else lens_at + 0.3)
+            out.append(B.text(ctx, part["lens_label"], lx - R - 40, ry + 26, 76, g, font="sans", weight=800,
+                              fill="ink", anchor="end", settle=False))
+    if part.get("wrong_label") and wrong_at is not None:
+        g = ctx.glyphs(B.plain_of(part["wrong_label"]), part.get("wrong_label_at"), start=None if part.get("wrong_label_at") else wrong_at)
+        yy = top + 40 + k_bad * (rh + gap) + rh / 2 + part.get("lens_r", 150) + 150
+        out.append(B.text(ctx, part["wrong_label"], x0 + iw * part.get("lens_x", 0.55), yy, part.get("label_size", 110),
+                          g, anchor="middle"))
+    return "".join(out), n * (rh + gap) + 80
+
+
+# ---- 任务单：逐条列出、打勾；某条到点被划掉并消失；空位可出现虚线并补回 -----------------------------------
+def todo(ctx, part, x, top, w, room, pad, t0):
+    a, ink, rule = ctx.col("accent"), ctx.col("ink"), ctx.col("rule")
+    items = part["items"]
+    size = part.get("size", 72)
+    rh, gap = part.get("row_h", size * 1.9), part.get("gap", 24)
+    x0, iw = x + pad, w - 2 * pad
+    bs = size * 0.95
+    n = len(items)
+    sa = _t(ctx, part, "scan_at", None)
+    sd = part.get("scan_dur", 0.22 * n)
+    out = []
+    for k, it in enumerate(items):
+        ry = top + 20 + k * (rh + gap)
+        at = ctx.at(it["at"]) if it.get("at") else t0 + 0.2 + 0.08 * k
+        box_x, cy = x0 + 26, ry + rh / 2
+        row = [f'<rect x="{_r(x0)}" y="{_r(ry)}" width="{_r(iw)}" height="{_r(rh)}" rx="22" fill="#FFFFFF" '
+               f'stroke="{rule}" stroke-width="3"/>',
+               f'<rect x="{_r(box_x)}" y="{_r(cy - bs / 2)}" width="{_r(bs)}" height="{_r(bs)}" rx="12" fill="none" '
+               f'stroke="{ctx.col("faint")}" stroke-width="6"/>']
+        tx = box_x + bs + 40
+        if it.get("text"):
+            g = ctx.glyphs(B.plain_of(it["text"]), it.get("text_at") or it.get("at"),
+                           start=None if (it.get("text_at") or it.get("at")) else at)
+            row.append(B.text(ctx, it["text"], tx, cy + size * 0.36, size, g, font="sans", weight=700))
+            tw = ctx.width(B.plain_of(it["text"]), size)
+        else:
+            tw = (iw - (tx - x0) - 60) * it.get("w", 0.6)
+            row.append(f'<rect x="{_r(tx)}" y="{_r(cy - 14)}" width="{_r(tw)}" height="28" rx="14" fill="{ctx.col("block")}"/>')
+        drop = ctx.at(it["drop_at"]) if it.get("drop_at") else None
+        tick_t = ctx.at(it["tick_at"]) if it.get("tick_at") else None
+        if tick_t is None and sa is not None and (drop is None or drop > sa + sd):
+            tick_t = sa + sd * (k + 0.6) / n
+        if tick_t is not None:
+            row.append(_tick(ctx, box_x + bs / 2, cy, bs * 0.8, tick_t, 0.25, 10))
+        body = "".join(row)
+        if drop is not None:
+            body += (f'<path data-anim="draw" data-delay="{_r(drop)}" data-dur="0.3" d="M{_r(tx - 10)},{_r(cy)} '
+                     f'L{_r(tx + tw + 10)},{_r(cy)}" stroke="{ink}" stroke-width="9" stroke-linecap="round"/>')
+            body = B.keys([[0, 0, 0, 1, 1], [drop + 0.45, 0, 0, 1, 1], [drop + 0.85, 30, 0, 1, 0]], body)
+        if not it.get("absent"):     # absent：这一条一开始就不在，只留虚线空位或之后补回
+            out.append(B.anim("fade-up", at, 0.35, body, ' data-shift="30"'))
+        if it.get("ghost_at"):
+            gt = ctx.at(it["ghost_at"])
+            ghost = (f'<rect x="{_r(x0)}" y="{_r(ry)}" width="{_r(iw)}" height="{_r(rh)}" rx="22" fill="{a}" '
+                     f'fill-opacity="0.06" stroke="{a}" stroke-width="6" stroke-dasharray="22 16"/>')
+            out.append(B.anim("pop", gt, 0.35, ghost))
+            if it.get("ghost_label"):
+                g = ctx.glyphs(it["ghost_label"], it.get("ghost_label_at"), start=None if it.get("ghost_label_at") else gt + 0.1)
+                out.append(B.text(ctx, it["ghost_label"], x0 + iw / 2, cy + size * 0.36, size, g, font="sans",
+                                  weight=800, fill="accent", anchor="middle", settle=False))
+        if it.get("restore_at"):
+            rt = ctx.at(it["restore_at"])
+            rest = (f'<rect x="{_r(x0)}" y="{_r(ry)}" width="{_r(iw)}" height="{_r(rh)}" rx="22" fill="{a}" '
+                    f'fill-opacity="0.14" stroke="{a}" stroke-width="5"/>'
+                    f'<rect x="{_r(box_x)}" y="{_r(cy - bs / 2)}" width="{_r(bs)}" height="{_r(bs)}" rx="12" fill="#FFFFFF" '
+                    f'stroke="{a}" stroke-width="6"/>')
+            if it.get("text"):
+                rest += (f'<text x="{_r(tx)}" y="{_r(cy + size * 0.36)}" font-family="{B.esc(ctx.font("sans"))}" '
+                         f'font-size="{size}" font-weight="700" fill="{ink}">{B.esc(B.plain_of(it["text"]))}</text>')
+            out.append(B.anim("fade-left", rt, 0.4, rest, ' data-shift="40"') + _tick(ctx, box_x + bs / 2, cy, bs * 0.8, rt + 0.3, 0.25, 10))
+    if sa is not None:
+        span = n * (rh + gap)
+        band = (f'<rect x="{_r(x0 - 16)}" y="{_r(top + 10)}" width="{_r(iw + 32)}" height="{_r(rh * 0.5)}" rx="14" '
+                f'fill="{a}" fill-opacity="0.18"/><rect x="{_r(x0 - 16)}" y="{_r(top + 10 + rh * 0.5 - 4)}" '
+                f'width="{_r(iw + 32)}" height="8" fill="{a}"/>')
+        out.append(B.keys([[0, 0, 0, 1, 0], [sa, 0, 0, 1, 0], [sa + 0.1, 0, 0, 1, 1],
+                           [sa + sd, 0, span - rh * 0.4, 1, 1], [sa + sd + 0.15, 0, span - rh * 0.4, 1, 0]], band))
+    return "".join(out), n * (rh + gap) + 40
+
+
+# ---- 水位条：按念到一段段涨，碰到虚线（阈值）时一震；可被“看不见”的磨砂盖住 ---------------------------------
+def level(ctx, part, x, top, w, room, pad, t0):
+    a, ink, block = ctx.col("accent"), ctx.col("ink"), ctx.col("block")
+    bw, bh = w - 2 * pad, part.get("h", 96)
+    x0, y0 = x + pad, top + 90
+    out = []
+    if part.get("label"):
+        lt = ctx.glyphs(part["label"], part.get("label_at"), start=None if part.get("label_at") else t0 + 0.15)
+        out.append(B.text(ctx, part["label"], x0, top + 50, 52, lt, font="mono", weight=700, fill="muted", ls=4, settle=False))
+    clip = B._id("lvl")
+    meter = [f'<defs><clipPath id="{clip}"><rect x="{_r(x0)}" y="{_r(y0)}" width="{_r(bw)}" height="{bh}" '
+             f'rx="{bh / 2}"/></clipPath></defs>'
+             f'<rect x="{_r(x0)}" y="{_r(y0)}" width="{_r(bw)}" height="{bh}" rx="{bh / 2}" fill="{block}"/>']
+    prev, segs = 0.0, []
+    for cue, frac, *rest in part.get("steps", []):    # 每段从上一段的末端接着涨，整条按圆角裁齐
+        st = ctx.at(cue)
+        dur = rest[0] if rest else 0.7
+        color = ctx.col(rest[1]) if len(rest) > 1 else a
+        segs.append(f'<rect data-anim="grow-bar" data-ease="in-out" data-delay="{_r(st)}" data-dur="{_r(dur)}" '
+                    f'x="{_r(x0 + bw * prev - 1)}" y="{_r(y0)}" width="{_r(bw * (frac - prev) + 1)}" height="{bh}" '
+                    f'fill="{color}"/>')
+        prev = frac
+    meter.append(f'<g clip-path="url(#{clip})">{"".join(segs)}</g>')
+    if part.get("limit") is not None:
+        lx = x0 + bw * part["limit"]
+        la = _t(ctx, part, "limit_at", t0 + 0.2)
+        meter.append(B.anim("fade", la, 0.3, f'<path d="M{_r(lx)},{_r(y0 - 34)} L{_r(lx)},{_r(y0 + bh + 34)}" '
+                                              f'stroke="{ink}" stroke-width="8" stroke-dasharray="16 12"/>'))
+        if part.get("limit_label"):
+            g = ctx.glyphs(part["limit_label"], part.get("limit_label_at"), start=None if part.get("limit_label_at") else la)
+            meter.append(B.text(ctx, part["limit_label"], lx, y0 + bh + 110, 60, g, font="sans", weight=700,
+                                anchor="middle", settle=False))
+    body = "".join(meter)
+    if part.get("hit_at"):
+        ht = ctx.at(part["hit_at"])
+        body = f'<g data-anim="shake" data-delay="{_r(ht)}" data-amp="20">{body}</g>'
+        if part.get("limit") is not None:
+            lx = x0 + bw * part["limit"]
+            body += (f'<g transform="translate({_r(lx)},{_r(y0 + bh / 2)})"><circle data-anim="shockwave" '
+                     f'data-delay="{_r(ht)}" data-dur="0.7" data-max="3" r="{bh * 0.6}" fill="none" stroke="{a}" '
+                     f'stroke-width="8"/></g>')
+    out.append(body)
+    if part.get("blind_at"):
+        bt = ctx.at(part["blind_at"])
+        cx, cy = x0 + bw / 2, y0 + bh / 2
+        veil = (f'<rect x="{_r(x0 - 24)}" y="{_r(y0 - 50)}" width="{_r(bw + 48)}" height="{_r(bh + 100)}" rx="30" '
+                f'fill="{ctx.col("page")}" fill-opacity="0.94" stroke="{ctx.col("rule")}" stroke-width="3"/>')
+        s = bh * 0.8
+        eye = (f'<path d="M{_r(cx - s)},{_r(cy)} Q{_r(cx)},{_r(cy - s * 0.9)} {_r(cx + s)},{_r(cy)} '
+               f'Q{_r(cx)},{_r(cy + s * 0.9)} {_r(cx - s)},{_r(cy)} Z" fill="none" stroke="{ctx.col("muted")}" stroke-width="9"/>'
+               f'<circle cx="{_r(cx)}" cy="{_r(cy)}" r="{_r(s * 0.28)}" fill="{ctx.col("muted")}"/>')
+        slash = (f'<path data-anim="draw" data-delay="{_r(bt + 0.25)}" data-dur="0.3" d="M{_r(cx - s * 0.9)},{_r(cy + s * 0.8)} '
+                 f'L{_r(cx + s * 0.9)},{_r(cy - s * 0.8)}" stroke="{ink}" stroke-width="12" stroke-linecap="round"/>')
+        out.append(B.anim("fade", bt, 0.3, veil + eye) + slash)
+    return "".join(out), bh + 220
+
+
 BODIES = {"terminal": terminal, "chat": chat, "dial": dial, "scan": scan, "gauges": gauges, "ring": ring,
-          "bar": bar, "flow": flow, "context_stack": context_stack}
+          "bar": bar, "flow": flow, "context_stack": context_stack, "inspect": inspect, "todo": todo,
+          "level": level}
 
 
 # ---- 一排并列卡片（各自到点升起、一直留着） -------------------------------------------------------

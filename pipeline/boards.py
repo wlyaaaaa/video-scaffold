@@ -343,6 +343,31 @@ def icon(ctx, name, cx, cy, size, t0):
         return anim("pop", t0, 0.45,
                     f'<text x="{_r(cx)}" y="{_r(cy + size * 0.42)}" text-anchor="middle" font-size="{_r(size * 1.3)}" '
                     f'font-family="{esc(ctx.font("heavy"))}" font-weight="900" fill="{a}">“</text>')
+    if name == "check":    # 打勾：绿圈里描出一笔勾
+        tick = (f"M{_r(cx - r * 0.42)},{_r(cy + r * 0.02)} L{_r(cx - r * 0.1)},{_r(cy + r * 0.34)} "
+                f"L{_r(cx + r * 0.46)},{_r(cy - r * 0.32)}")
+        disc = anim("pop", t0, 0.35, f'<circle cx="{_r(cx)}" cy="{_r(cy)}" r="{_r(r * 0.92)}" fill="{a}" fill-opacity="0.14"/>')
+        return disc + draw(tick, t0 + 0.12, 0.35, w=sw * 1.3)
+    if name == "hook":     # 挂钩：钉座弹出，钩身一笔描出
+        s = r * 0.9
+        d = (f"M{_r(cx)},{_r(cy - s)} L{_r(cx)},{_r(cy + s * 0.35)} A{_r(s * 0.42)},{_r(s * 0.42)} 0 1 1 "
+             f"{_r(cx - s * 0.84)},{_r(cy + s * 0.35)} L{_r(cx - s * 0.84)},{_r(cy + s * 0.12)}")
+        mount = anim("pop", t0, 0.3, f'<circle cx="{_r(cx)}" cy="{_r(cy - s)}" r="{_r(sw * 1.6)}" fill="{ink}"/>')
+        return mount + draw(d, t0 + 0.1, 0.5, color=ink, w=sw * 1.2)
+    if name == "eye":      # 眼睛：轮廓描出，瞳孔弹出
+        s = r * 0.95
+        d = (f"M{_r(cx - s)},{_r(cy)} Q{_r(cx)},{_r(cy - s * 0.95)} {_r(cx + s)},{_r(cy)} "
+             f"Q{_r(cx)},{_r(cy + s * 0.95)} {_r(cx - s)},{_r(cy)} Z")
+        pupil = anim("pop", t0 + 0.35, 0.3, f'<circle cx="{_r(cx)}" cy="{_r(cy)}" r="{_r(s * 0.3)}" fill="{a}"/>')
+        return draw(d, t0, 0.45, color=ink, w=sw) + pupil
+    if name == "lock":     # 锁：锁身弹出，锁梁描出
+        bw_, bh_ = r * 1.25, r * 0.95
+        body = anim("pop", t0, 0.3, f'<rect x="{_r(cx - bw_ / 2)}" y="{_r(cy - bh_ * 0.2)}" width="{_r(bw_)}" '
+                                    f'height="{_r(bh_)}" rx="{_r(r * 0.16)}" fill="{a}"/>')
+        d = (f"M{_r(cx - bw_ * 0.32)},{_r(cy - bh_ * 0.2)} L{_r(cx - bw_ * 0.32)},{_r(cy - r * 0.45)} "
+             f"A{_r(bw_ * 0.32)},{_r(bw_ * 0.32)} 0 0 1 {_r(cx + bw_ * 0.32)},{_r(cy - r * 0.45)} "
+             f"L{_r(cx + bw_ * 0.32)},{_r(cy - bh_ * 0.2)}")
+        return draw(d, t0 + 0.15, 0.35, color=a, w=sw * 1.3) + body
     raise ValueError(f"unknown icon {name!r}")
 
 
@@ -468,11 +493,18 @@ def body_part(ctx, part, x, top, w, room, pad, t0, cid):
         flip_at = ctx.at(part["flip_at"]) if part.get("flip_at") else None
         cells = []
         order = sorted(flips)
+        gx = x + pad + ((w - 2 * pad - cols * cell - (cols - 1) * gap) / 2 if part.get("center") else 0)
         for k in range(n):
-            cx_ = x + pad + (k % cols) * (cell + gap)
+            cx_ = gx + (k % cols) * (cell + gap)
             cy_ = top + 20 + (k // cols) * (cell + gap)
             sq = (f'<rect x="{_r(cx_)}" y="{_r(cy_)}" width="{_r(cell)}" height="{_r(cell)}" rx="10" '
                   f'fill="{a}" fill-opacity="0.22"/>')
+            if part.get("glyph") == "image":     # 图片占位：小太阳 + 两座山
+                s = cell
+                sq += (f'<circle cx="{_r(cx_ + s * 0.7)}" cy="{_r(cy_ + s * 0.3)}" r="{_r(s * 0.09)}" fill="#FFFFFF"/>'
+                       f'<path d="M{_r(cx_ + s * 0.12)},{_r(cy_ + s * 0.8)} L{_r(cx_ + s * 0.38)},{_r(cy_ + s * 0.45)} '
+                       f'L{_r(cx_ + s * 0.55)},{_r(cy_ + s * 0.66)} L{_r(cx_ + s * 0.68)},{_r(cy_ + s * 0.52)} '
+                       f'L{_r(cx_ + s * 0.88)},{_r(cy_ + s * 0.8)} Z" fill="{a}" fill-opacity="0.75"/>')
             cells.append(anim("pop", on + k * part.get("step", 0.018), 0.3, sq))
             if k in flips and flip_at is not None:
                 dk = flip_at + order.index(k) * part.get("flip_step", 0.07)
