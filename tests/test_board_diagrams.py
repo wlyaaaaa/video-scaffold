@@ -191,6 +191,36 @@ class DiagramTests(unittest.TestCase):
         shown = ["".join(el.itertext()) for el in parse_fragment(frag).iter() if el.get("data-glyph-times")]
         self.assertEqual(shown, ["清手机", "换电脑"])
 
+    def test_screen_crops_pans_and_plays_clip_frames_to_the_end(self):
+        """网页窗口：截图按源像素裁切、平移；录屏抽成帧逐帧播放，没放完就换下一张会被检查拦住。"""
+        import config
+        import subprocess
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            Image.new("RGB", (400, 1200), "white").save(base / "page.png")
+            subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                            "testsrc=size=320x180:rate=30:duration=2", "-pix_fmt", "yuv420p", str(base / "rec.mp4")],
+                           check=True)
+            with patch.object(config, "DIR_ASSETS", str(base / "work")):
+                el = {"screen": [
+                    {"at": "同一个要求", "image": "page.png", "crop": [0, 0, 400, 234],
+                     "pan": {"to": [0, 900, 400, 234], "at": "说了", "dur": .5},
+                     "marks": [{"at": "好几遍", "box": [10, 950, 100, 40], "label": "好几遍"}]},
+                    {"at": "最后一句", "clip": "rec.mp4", "from": 0, "to": 1, "crop": [0, 0, 320, 180], "fps": 10}],
+                    "at": "同一个要求"}
+                frag = self.build([el], base=base, end=self.tl.duration)
+                root = parse_fragment(frag)
+                frames = [n for n in root.iter() if n.get("data-anim") == "frames"]
+                self.assertEqual(len(frames), 1)
+                self.assertEqual(len(list(frames[0])), 10)
+                self.assertAlmostEqual(float(frames[0].get("data-dur")), 1.0)
+                self.assertEqual([f for f in pages.unfinished(frag, self.tl.duration + 2) if not f[4]], [])
+                el["screen"].append({"at": "最后一句+0.3s", "image": "page.png"})
+                late = [f for f in pages.unfinished(self.build([el], base=base, end=self.tl.duration),
+                                                    self.tl.duration + 2) if not f[4]]
+                self.assertIn("frames", [f[0] for f in late])
+
     def test_bad_time_range_fails(self):
         with self.assertRaises(ValueError):
             self.build([{"time_stretch": {"start_label": "一个小时", "stretch_at": "一整天",

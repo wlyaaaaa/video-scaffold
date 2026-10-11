@@ -582,7 +582,157 @@ def rail(ctx, el):
     return "".join(out)
 
 
+def _clip_frames(src, crop, start, end, fps, width):
+    """录屏片段 → 一串 JPEG 帧（按源文件、区间、裁切、帧率、宽度缓存在本次工作目录）。"""
+    import hashlib
+    import subprocess
+    from pathlib import Path
+
+    import config
+    st = src.stat()
+    key = hashlib.sha256(repr((str(src), st.st_size, st.st_mtime_ns, crop, start, end, fps, width))
+                         .encode()).hexdigest()[:16]
+    out = Path(config.DIR_ASSETS) / "screen-clips" / key
+    done = out / "done.json"
+    if not done.exists():
+        out.mkdir(parents=True, exist_ok=True)
+        for old in out.glob("f_*.jpg"):
+            old.unlink()
+        cx, cy, cw, ch = crop
+        vf = f"crop={cw}:{ch}:{cx}:{cy},fps={fps},scale={width}:-2"
+        subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(src),
+                        "-t", f"{end - start:.3f}", "-vf", vf, "-q:v", "3", str(out / "f_%04d.jpg")], check=True)
+        done.write_text("{}", encoding="utf-8")
+    frames = sorted(out.glob("f_*.jpg"))
+    if not frames:
+        raise ValueError(f"screen clip {src.name}: no frames in {start}–{end}s")
+    return frames
+
+
+def _video_dims(src):
+    import subprocess
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                          "-of", "csv=p=0", str(src)], capture_output=True, text=True, check=True).stdout
+    w, h = out.strip().split(",")[:2]
+    return int(w), int(h)
+
+
+def _fit(crop, cx, cy, cw, ch):
+    """源图区域 crop=(x,y,w,h) 铺满内容区（等比、居中裁掉多余）：返回 (平移x, 平移y, 缩放)。"""
+    x, y, w, h = crop
+    s = max(cw / w, ch / h)
+    return cx + cw / 2 - (x + w / 2) * s, cy + ch / 2 - (y + h / 2) * s, s
+
+
+def screen(ctx, el):
+    """网页/软件窗口：里面按词轴换几段真截图或录屏，可裁切、平移、圈出局部。
+
+    shots: [{at, image|clip, crop?: [x,y,w,h] 源像素, pan?: {to, at, dur}, from?, to?, fps?, play_at?, label?,
+             marks?: [{at, box: [x,y,w,h] 源像素, shape?: rect|circle, label?, label_at?, side?}]}]
+    录屏先按区间、裁切抽成帧，运行时按 t 显示当前帧（data-anim="frames"），放完停在最后一帧。
+    """
+    from pipeline.pages import _resolve
+    shots = el["screen"]
+    x, y, w, h = el.get("x", 1960), el.get("y", 470), el.get("w", 1680), el.get("h", 1060)
+    bar = el.get("bar", 76)
+    a, ink, rule = ctx.col("accent"), ctx.col("ink"), ctx.col("rule")
+    cx, cy, cw, ch = x, y + bar, w, h - bar
+    t_in = ctx.at(el["at"])
+    wid = B._id("scr")
+    out = [f'<defs><clipPath id="{wid}c"><rect x="{cx:g}" y="{cy:g}" width="{cw:g}" height="{ch:g}" rx="0"/></clipPath>'
+           f'<filter id="{wid}s" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="24" '
+           f'stdDeviation="34" flood-color="#1A1A17" flood-opacity="0.10"/></filter></defs>',
+           rect(x, y, w, h, "#FFFFFF", radius=30, stroke=rule, sw=3, extra=f' filter="url(#{wid}s)"')]
+    for k, dot in enumerate(("#E5E2DA", "#E5E2DA", "#E5E2DA")):
+        out.append(circle(x + 52 + k * 46, y + bar / 2, 13, dot))
+    starts = [ctx.at(s["at"]) for s in shots]
+    layers = []
+    for k, sh in enumerate(shots):
+        t0 = starts[k]
+        nxt = starts[k + 1] if k + 1 < len(shots) else None
+        src = _resolve(ctx.b.base, sh.get("image") or sh["clip"])
+        parts = []
+        if sh.get("image"):
+            iw, ih = ctx.L.img_dims(str(src))
+            crop = sh.get("crop", [0, 0, iw, ih])
+            tx, ty, s = _fit(crop, cx, cy, cw, ch)
+            img = (f'<image href="{ctx.L.FU(str(src))}" x="0" y="0" width="{iw}" height="{ih}" '
+                   f'preserveAspectRatio="none"/>')
+            final = (tx, ty, s)
+            if sh.get("pan"):
+                pan = sh["pan"]
+                pa = ctx.at(pan["at"]) if pan.get("at") else t0 + 0.4
+                tx1, ty1, s1 = _fit(pan["to"], cx, cy, cw, ch)
+                track = [[0, tx, ty, s, 1], [pa, tx, ty, s, 1], [pa + pan.get("dur", 1.2), tx1, ty1, s1, 1]]
+                parts.append(B.keys(track, img))
+                final = (tx1, ty1, s1)
+            else:
+                parts.append(f'<g transform="translate({tx:.2f},{ty:.2f}) scale({s:.5f})">{img}</g>')
+        else:
+            vw, vh = _video_dims(src)
+            crop = [int(v) for v in sh.get("crop", [0, 0, vw, vh])]
+            fps = sh.get("fps", 30)
+            frames = _clip_frames(src, tuple(crop), float(sh.get("from", 0)), float(sh["to"]), fps,
+                                  int(sh.get("frame_w", 1280)))
+            tx, ty, s = _fit(crop, cx, cy, cw, ch)          # 帧本身就是裁好的区域，标注仍按源像素算
+            fw, fh = crop[2], crop[3]
+            place = f'x="{tx + crop[0] * s:.2f}" y="{ty + crop[1] * s:.2f}" width="{fw * s:.2f}" height="{fh * s:.2f}"'
+            final = (tx, ty, s)
+            play = ctx.at(sh["play_at"]) if sh.get("play_at") else t0
+            parts.append(f'<image href="{frames[0].as_uri()}" {place} preserveAspectRatio="none"/>')
+            imgs = "".join(f'<image href="{f.as_uri()}" {place} preserveAspectRatio="none"/>' for f in frames)
+            parts.append(f'<g data-anim="frames" data-delay="{play:.4f}" data-dur="{len(frames) / fps:.4f}" '
+                         f'data-fps="{fps:g}">{imgs}</g>')
+        content = f'<g clip-path="url(#{wid}c)">{"".join(parts)}</g>'
+        if sh.get("label"):
+            fs = 44
+            lt = ctx.glyphs(sh["label"], sh.get("label_at"), start=None if sh.get("label_at") else t0 + 0.1)
+            pw = ctx.width(sh["label"], fs) + 90
+            content += (rect(x + w / 2 - pw / 2, y + bar / 2 - 26, pw, 52, ctx.col("page"), radius=26)
+                        + B.text(ctx, sh["label"], x + w / 2, y + bar / 2 + 15, fs, lt, font="mono", weight=700,
+                                 fill="muted", anchor="middle", settle=False))
+        tx, ty, s = final
+        for m in sh.get("marks", []):
+            ma = ctx.at(m["at"])
+            bx, by, bw, bh = m["box"]
+            X, Y, W, H = tx + bx * s, ty + by * s, bw * s, bh * s
+            if m.get("shape") == "none":      # 只放说明胶囊（例如对着会动的东西，不画框）
+                pass
+            elif m.get("shape") == "circle":
+                r = max(W, H) / 2
+                d = f'M{X + W / 2:.1f},{Y + H / 2 - r:.1f} A{r:.1f},{r:.1f} 0 1 1 {X + W / 2 - .1:.1f},{Y + H / 2 - r:.1f}'
+                content += line(ctx, d, ma, .5, sw=9)
+                content += pulse(ctx, X + W / 2, Y + H / 2, r * 1.15, ma + .5)
+            else:
+                content += rect(X, Y, W, H, "none", radius=14, stroke=a, sw=8,
+                                extra=f' data-anim="draw" data-delay="{ma:.4f}" data-dur="0.5"')
+            if m.get("label"):
+                fs = m.get("size", 64)
+                lw = ctx.width(m["label"], fs) + 64
+                side = m.get("side", "below")
+                lx = min(max(X + W / 2 - lw / 2, cx + 20), cx + cw - lw - 20)
+                ly = Y + H + 26 if side == "below" else Y - fs * 1.6 - 26
+                lt = ctx.glyphs(m["label"], m.get("label_at"), start=None if m.get("label_at") else ma + .35)
+                chip = (rect(lx, ly, lw, fs * 1.6, a, radius=fs * .8)
+                        + B.text(ctx, m["label"], lx + lw / 2, ly + fs * 1.15, fs, lt, font="sans", weight=800,
+                                 fill="#FFFFFF", anchor="middle", settle=False))
+                content += B.anim("pop", min(lt), .35, chip)
+        enter = 0.0 if k == 0 else 0.35
+        shot = content if k == 0 else B.anim("fade", t0, enter, content)
+        if nxt is not None:
+            shot = B.out_at(nxt + 0.35, shot, 0.05)
+        layers.append(shot)
+    out.extend(layers)
+    body = "".join(out)
+    if el.get("enter", "rise") == "iris":
+        clip = f"{wid}i"
+        return (f'<defs><clipPath id="{clip}"><circle data-anim="iris" data-ease="out" data-delay="{t_in:.4f}" '
+                f'data-dur="0.7" data-r0="0" data-r1="{math.hypot(w, h):.1f}" cx="{x + w / 2:g}" cy="{y + h / 2:g}" '
+                f'r="0"/></clipPath></defs><g clip-path="url(#{clip})">{body}</g>')
+    return B.anim("fade-up", t_in, 0.55, body, ' data-shift="80"')
+
+
 KINDS = {"screenshot": screenshot_stamp, "repeat_flow": repeat_flow, "focus_network": focus_network,
          "time_stretch": time_stretch, "scan_grid": scan_grid, "capacity_gauges": capacity_gauges,
          "device_flow": device_flow, "condense": condense, "cross_check": cross_check, "lanes": lanes,
-         "rail": rail}
+         "rail": rail, "screen": screen}
