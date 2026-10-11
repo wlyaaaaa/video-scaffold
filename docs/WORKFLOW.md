@@ -74,7 +74,7 @@ subtitles 生成全片 SRT/WebVTT，不烧进画面，并绑定词轴来源。ma
 
 ## 图文页：分镜表到有声动画
 
-在底座运行 `python -m pipeline.pages <本期/pages/段落.json> plan|stills|render`。`plan` 核对实际起止与绑词；`stills` 用本机 Chrome 无头出关键帧；`render` 复用既有构建、布局检查和逐帧渲染，再接同一段配音与逐步显示字幕。全部素材、片段和中间产物在本期目录；下一段只换配音、素材和镜头，不复制底座代码。字段及参考研究方法见 AUTHORING.md“图文页”。
+在底座运行 `python -m pipeline.pages <本期/pages/段落.json> plan|stills|render`。`plan` 核对实际起止与绑词；`stills` 用本机 Chrome 无头出关键帧；`render` 复用既有构建、布局检查和逐帧渲染，再接同一段配音与逐步显示字幕。几段同时出片时套上排队：`python -m pipeline.render_queue -- python -m pipeline.pages <表.json> render`，全机同时出片数和可用内存都够才放行（`VIDEO_RENDER_SLOTS` 默认 2，`VIDEO_RENDER_MIN_FREE_GB` 默认 14）。全部素材、片段和中间产物在本期目录；下一段只换配音、素材和镜头，不复制底座代码。字段及参考研究方法见 AUTHORING.md“图文页”。
 
 真实截图用 `screenshot` 元素直接引用原文件。字幕取原配音文字，截图整体在关联数字或事实已念到后贴入；来源图的既有界面文字按截图内容展示，不拆成重新绘制的字幕。原图不裁切、不覆盖，强调框为独立 SVG 图层。
 
