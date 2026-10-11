@@ -202,9 +202,9 @@ class Seg06BodyTests(unittest.TestCase):
             for got, exp in zip(delays, want):
                 self.assertAlmostEqual(got, exp, places=3)
 
-    def test_name_spoken_only_after_this_page_types_from_its_cue(self):
+    def test_name_spoken_only_after_this_page_is_not_automatically_summary(self):
         end = self.tl.char_time(TEXT.find("光")) - 0.1      # 本页在“Claude”被念到之前结束
         frag = self.build([{"focus_network": {"nodes": [{"label": "Claude", "at": "天天"}]}, "at": "网上"}], end=end)
         root = parse_fragment(frag)
         el = next(e for e in root.iter() if e.get("data-glyph-times") and "".join(e.itertext()) == "Claude")
-        self.assertLess(max(json.loads(el.get("data-glyph-times"))), end)
+        self.assertGreater(max(json.loads(el.get("data-glyph-times"))), end)

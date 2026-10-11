@@ -249,7 +249,7 @@ class DiagramTests(unittest.TestCase):
                  "fold_at": "全打满", "return_at": "注意力", "result": {"text": "更全面", "at": "更全面"}},
                 {"tiles": [{"title": "毛病", "at": "毛病", "logo": "x"}, {"title": "流量", "at": "流量"}]},
                 {"rail": [{"label": "清手机", "logo": "x"}, {"label": "换电脑", "logo": "x"}], "current": 1,
-                 "at": "毛病"},
+                 "at": "毛病", "replay": True},
             ]:
                 builder.element(el)
             frag = "".join(builder.out + builder.mout)

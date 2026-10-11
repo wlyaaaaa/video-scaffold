@@ -53,24 +53,23 @@ class Ctx:
         from pipeline.pages import cue_time
         return cue_time(self.b.tl, cue, self.b.pos)[1]
 
-    def glyphs(self, plain, cue=None, start=None, search=True):
+    def glyphs(self, plain, cue=None, start=None, search=True, summary=False):
         """plain 每个字的本页出现时刻。原文里找得到：各字被念到的时刻；找不到：从 start/cue 起逐字打出。
         search=False：已讲过的字样重现，不在后文里找，直接从 start/cue 起打出。"""
         tl, b = self.b.tl, self.b
+        summary = summary or b.options.get("summary", False)
+        if hasattr(b, "record_glyphs"):
+            b.record_glyphs(plain, cue, start, summary or not search)
         t0 = start if start is not None else self.at(cue)
         idx = -1
         core = plain.strip("“”\"「」 ")
-        if core and search:
+        if core and search and not summary:
             frm = b.pos
             if cue:
                 frm = max(b.pos, self.cue_pos(cue) - len(core))
             idx = tl.text.find(core, frm)
             if idx < 0:
                 idx = tl.text.find(core, b.pos)
-            # 本页之后才念到的字（如别处才提到的名字）在本页只当概括字样，从 start/cue 起打出
-            ct = tl.char_time(idx) if idx >= 0 else None
-            if ct is not None and ct >= getattr(b, "end", float("inf")):
-                idx = -1
         if idx < 0:
             out, k = [], 0
             for ch in plain:

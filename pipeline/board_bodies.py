@@ -138,7 +138,9 @@ def chat(ctx, part, x, top, w, room, pad, t0):
                          f'font-family="{B.esc(ctx.font("mono"))}" font-size="40" font-weight="700" fill="#FFFFFF">AI</text>')
         body = ""
         if s:
-            g = [max(v, at) for v in ctx.glyphs(B.plain_of(s), it["at"])]   # 字不早于自己的气泡出现
+            g = ctx.glyphs(B.plain_of(s), it["at"])
+            if it.get("text_with_bubble", part.get("text_with_bubble", False)):
+                g = [round(max(v, at), 4) for v in g]
             body = B.text(ctx, s, bx + size * 0.7, y + bh / 2 + size * 0.36, size, g, font="sans", weight=600)
         else:
             for k in range(it.get("lines", 1)):
@@ -635,7 +637,8 @@ def level(ctx, part, x, top, w, room, pad, t0):
     if part.get("blind_at"):
         bt = ctx.at(part["blind_at"])
         cx, cy = x0 + bw / 2, y0 + bh / 2
-        veil = (f'<rect x="{_r(x0 - 24)}" y="{_r(y0 - 26)}" width="{_r(bw + 48)}" height="{_r(bh + 52)}" rx="30" '
+        margin = 26 if part.get("compact_veil") else 50
+        veil = (f'<rect x="{_r(x0 - 24)}" y="{_r(y0 - margin)}" width="{_r(bw + 48)}" height="{_r(bh + 2 * margin)}" rx="30" '
                 f'fill="{ctx.col("page")}" fill-opacity="0.94" stroke="{ctx.col("rule")}" stroke-width="3"/>')
         s = bh * 0.8
         eye = (f'<path d="M{_r(cx - s)},{_r(cy)} Q{_r(cx)},{_r(cy - s * 0.9)} {_r(cx + s)},{_r(cy)} '

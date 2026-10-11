@@ -585,8 +585,8 @@ def rail(ctx, el):
                    else circle(xs[k], y, 20, ink))
             out.append(B.anim("fade", min(when, t0) if not st.get("at") else when, .25, dot))
             # 讲过的步骤：名字早已念过，跟着点直接打出，不去后文里找同名的字
-            g = (ctx.glyphs(st["label"], st["at"]) if st.get("at") else
-                 [round(min(when, t0) + B.TYPE_STEP * i, 4) for i in range(len(st["label"]))])
+            g = ctx.glyphs(st["label"], st.get("at"), start=None if st.get("at") else when,
+                           search=not (st.get("replay") or el.get("replay")))
             out.append(B.text(ctx, st["label"], xs[k], y + 100, 58, g, font="sans", weight=700, fill="muted",
                               anchor="middle", settle=False))
         else:
@@ -693,8 +693,12 @@ def screen(ctx, el):
             vw, vh = _video_dims(src)
             crop = [int(v) for v in sh.get("crop", [0, 0, vw, vh])]
             fps = sh.get("fps", 30)
-            frames = _clip_frames(src, tuple(crop), float(sh.get("from", 0)), float(sh["to"]), fps,
-                                  int(sh.get("frame_w", 1280)))
+            if getattr(ctx.b, "prepare_assets", True):
+                frames = _clip_frames(src, tuple(crop), float(sh.get("from", 0)), float(sh["to"]), fps,
+                                      int(sh.get("frame_w", 1280)))
+            else:
+                count = max(1, round((float(sh["to"]) - float(sh.get("from", 0))) * fps))
+                frames = [src] * count  # 只读检查仍保留帧数和时长，不抽帧、不写缓存
             tx, ty, s = _fit(crop, cx, cy, cw, ch)          # 帧本身就是裁好的区域，标注仍按源像素算
             fw, fh = crop[2], crop[3]
             place = f'x="{tx + crop[0] * s:.2f}" y="{ty + crop[1] * s:.2f}" width="{fw * s:.2f}" height="{fh * s:.2f}"'

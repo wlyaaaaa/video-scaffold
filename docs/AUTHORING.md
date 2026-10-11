@@ -113,7 +113,9 @@
 
 **用标志代表某一方（logo）。** 圆点代表某个公司或模型时（Claude、Claude Code、Opus 一方；OpenAI、Codex、GPT 一方……），可以换成标志图：分镜表顶层写 `"brands": {"claude": "../art/brand/claude.png", "openai": "../art/brand/openai.png"}`，元素里写 `"logo": "claude"`（也可直接写图片路径）。标志放进白底圆里，按圆裁切，透明底和纯白底的方图都行；找不到图直接报错。不写 `logo` 的地方画法和原来完全一样。支持的位置：`timeline` 节点（`logo`、`logo_r` 默认 52，最新节点描绿圈）、`tiles` 卡片（标题右侧，`logo_r`、`logo_at`）、`rail` 步骤、`tree` 节点、`tally` 行（名字前放标志）、卡片 `logo`（标题右侧，和 `icon` 二选一）、`comments` 胶囊（条目写 `[文字, 绑词, 标志]` 或 `{text, at, logo}`）、`focus_network` 节点、`cross_check` 的 `checker.logo`、`lanes` 的 `spawn.logo`、`condense` 的 `worker.logo`、`handoff` 的 `from.logo`/`to.logo`、`layers` 每层 `logo`、`gate` 的 `receiver.logo`。圆里原来写名字的节点（如核对者、分出去的模型）有标志时名字改写在圆下方，保持看得清。标志只代表“哪一方”，不代表数据。
 
-**动画放完才退场（出片时检查，不过就报错）。** 每个有限的动画（入场、描线、滚动、移动、划线……）都要在它所在的组退场（`exit_at`）、整页被 `wipe` 盖住或换页之前放完，并停够 `config.PAGE_MOTION["hold"]`（0.25 秒）；呼吸、循环流动、照片推近、声波和进度条不算。念得快放不下，就缩短动画、提前到前一个词，或换动法，不许半路切走。本人已审定、不再改的旧元素可写 `"hold_check": "warn"`，只提示不拦。一段配音一张表整段出片，不分段拼接。
+**已有画面的兼容选项。** `summary: true` 明确表示元素是概括字样，从绑定词开始打出；不声明时，原文里的字仍按真正词轴，后文的字不会自动提前。`tiles.replay` 和 `rail.replay` 用于已讲内容重现，统一复用同一逐字入口。`level` 内容块的 `compact_veil: true` 选择紧凑遮罩；默认保留旧遮罩。`chat` 的 `text_with_bubble: true` 让文本不早于自己的气泡入场；默认保留原文字时刻。修改已通过段落时先用 `pipeline.page_compare` 比对片段，变化的页附前后静帧，审定后再改该期分镜表。
+
+**动画放完才退场（plan、stills、render 都检查，不过就报错）。** 每个有限的动画（入场、描线、滚动、移动、划线……）都要在它所在的组退场（`exit_at`）、整页被 `wipe` 盖住或换页之前放完，并停够 `config.PAGE_MOTION["hold"]`（0.25 秒）；呼吸、循环流动、照片推近、声波和进度条不算。念得快放不下，就缩短动画、提前到前一个词，或换动法，不许半路切走。本人已审定、不再改的旧元素可写 `"hold_check": "warn"`，只提示不拦。一段配音一张表整段出片，不分段拼接。
 
 这些版式用到的运行时原语：`type`（`data-glyph-times` 逐字、`data-glyph-from` 由浅变深）、`keys`（关键帧移动/缩放/透明度）、`mark`（按字的位置画底色条、删除线、下划线）、`iris`（圆半径，盖页或圆形揭示）、`wave`、`shake`、`frames`（录屏帧按 `data-fps` 逐帧显示，前一帧垫在下面防闪白），以及文字的 `data-follow`（单位跟在滚动数字后面）。一期的内容写在本期 `pages\*.json`，版式不够用时在 `boards.py` 加一种（会复用的才加）。
 
@@ -133,8 +135,8 @@
 | `lanes` | `{lanes: [{label, at}], spawn?: {at, node_text?, offset?}, dots?}`：几条并行轨道，主线一直在走，另一条从某点分出来并行跑，互不等待。 |
 | `rail` | 值为步骤列表（字符串或 `{label, at, logo?}`），`current` 当前第几步、`go_at` 从上一步走过来：章节进度轨，已讲过的黑点灰字、当前绿点绿字，没讲到的只留空点、不提前写字。步骤写 `logo` 时点换成标志（当前一步描绿圈，`logo_r` 调大小），适合“一个个讲过几个型号/角色”的人员轨。讲过的步骤名跟着点直接打出。 |
 | `tree` | `{at, label?, logo?, children: [节点…]}`：分派树，一个节点按念到往下分出子节点、一层层拆开；`return_at` 结果点从最底层逐层流回顶上（`return_step` 每层秒数），`fold_at` 中间层变淡，`result: {text, at}` 在根旁弹出结果卡。`x/y/w`、`level_gap`、`node_r`（每层半径列表）调尺寸。适合委派、层层拆任务、汇总结果。 |
-| `screen` | 网页/软件窗口（白卡、三个灰点、顶上小标签）：里面按词轴换几段真截图或录屏，后一段叠化盖上前一段。截图 `image` 可 `crop: [x,y,w,h]`（源像素，等比铺满、多余裁掉）、`pan: {to, at, dur}` 平移/推拉到另一块区域（长页滑到某一节）；录屏 `clip` 写 `from`/`to` 秒和 `crop`，出片时按区间抽帧（默认 30fps、宽 1280，缓存在本次工作目录），运行时 `frames` 原语逐帧显示，放完停在最后一帧，要在下一段盖上前放完。`marks: [{at, box, shape: rect\|circle\|none, label, label_at, side}]` 按源像素圈出局部并弹出绿胶囊。截图里有隐私先裁掉；`screenshot`（整图不裁）照旧可用 |
-| `desc_links` | 值为 `[{label, at, icon?, w?}]`：“地址在简介里”。简介框里一行一个去处（`icon` 可选 `globe`/`code`/`play`，名称逐字按词轴，地址只画打码条，不写真实网址或账号）；`point_at` 时框描绿、下方箭头指向简介。`x/y/w/row_h`、`title` 可改。 |
+| `screen` | 网页/软件窗口（白卡、三个灰点、顶上小标签）：里面按词轴换几段真截图或录屏，后一段叠化盖上前一段。截图 `image` 可 `crop: [x,y,w,h]`（源像素，等比铺满、多余裁掉）、`pan: {to, at, dur}` 平移/推拉到另一块区域（长页滑到某一节）；录屏 `clip` 写 `from`/`to` 秒和 `crop`，出片时按区间抽帧（默认 30fps、宽 1280，缓存在本次工作目录），运行时 `frames` 原语逐帧显示，放完停在最后一帧，要在下一段盖上前放完。`marks: [{at, box, shape: rect\|circle\|none, label, label_at, side}]` 按源像素圈出局部并弹出绿胶囊。公开内容按活动规则约法 L20 与《个人资料与数据处理》的公开分级表判断；`screenshot`（整图不裁）照旧可用 |
+| `desc_links` | 值为 `[{label, at, icon?, w?}]`：“地址在简介里”。简介框里一行一个去处（`icon` 可选 `globe`/`code`/`play`，名称逐字按词轴，默认用条形表示地址，也可按本期内容自绘准确地址）；`point_at` 时框描绿、下方箭头指向简介。`x/y/w/row_h`、`title` 可改。 |
 | `sanlian` | `{at, follow_at?, labels?, follow?, followed?}`：一键三连。点赞、投币、收藏三枚图标弹出，外圈一起“长按蓄力”描满后同时点亮并冲击波；`follow_at` 弹出“+ 关注”按钮随即变成“已关注”。`x/y` 为中间图标圆心，`size`、`gap` 调大小。 |
 | `handoff` | `{heads?: [{text, at}×2], rows: [{from: {label, at, logo?}, to: {label, at, logo?}, check_at?}], chain?}`：一方做、另一方审。左列做的一方、右列审的一方，交付物沿箭头递过去、正好在念到审的一方时到达，`check_at` 打勾；`chain: true` 在上一行审的一方和下一行做的一方同名时画虚线连起。`x/y/w/row_gap/r/label_size` 调尺寸。 |
 | `layers` | `{slabs: [{label, at, label_at?, holes: [比例…], logo?}], shots: [{at, lane, stop?, hit_at?, end_at?/dur?, label?, label_at?, glyph?: "image", r?, clear_at?}], align?: {at, slab, to: [比例…], label?, label_at?}}`：几层把关（瑞士奶酪）。问题点沿 `lane`（高度比例）匀速飞来，穿过洞时洞口闪一下，`stop` 指定撞上第几层的实心处被拦下（`hit_at` 到达、冲击波、该层一震）；`align` 让某层的洞挪到和别层对齐（盲区重合），之后的点一路穿过。被拦下的点默认在对齐时淡出。`x/y/w/h/slab_w/hole_h` 调尺寸。 |
