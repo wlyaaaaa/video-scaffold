@@ -1265,7 +1265,328 @@ def verdict(ctx, el):
     return "".join(out)
 
 
+def _track(points, what):
+    """keys 关键帧要按时间递增；绑词顺序写反时直接报错，不让动画倒着走。"""
+    for p, q in zip(points, points[1:]):
+        if q[0] < p[0] - 1e-6:
+            raise ValueError(f"{what}: cue times go backwards ({p[0]:.2f}s → {q[0]:.2f}s)")
+    return points
+
+
+def _spines(ctx, xs, top, sw_, sh_, labels, current, *, size=76):
+    """一排书脊（卷宗）。返回每本的 SVG（局部坐标，按书脊左上角摆好），最后一本（current）绿色。"""
+    a, rule = ctx.col("accent"), ctx.col("rule")
+    out = []
+    for k, (sx, lab) in enumerate(zip(xs, labels)):
+        cur = k == current
+        body = rect(sx, top, sw_, sh_, a if cur else "#FFFFFF", radius=22, stroke=a if cur else rule, sw=5)
+        body += rect(sx + sw_ * 0.2, top + 70, sw_ * 0.6, 110, "#FFFFFF" if cur else ctx.col("block"), radius=14,
+                     extra=f' fill-opacity="{0.9 if cur else 1}"')
+        body += (f'<text x="{sx + sw_ / 2:g}" y="{top + 125 + size * 0.36:g}" text-anchor="middle" '
+                 f'font-family="{B.esc(ctx.font("mono"))}" font-size="{size}" font-weight="700" '
+                 f'fill="{a if cur else ctx.col("muted")}">{B.esc(lab)}</text>')
+        for j in range(3):      # 书脊下部几道细纹，像装订线
+            yy = top + sh_ - 150 + j * 34
+            body += rect(sx + 26, yy, sw_ - 52, 8, "#FFFFFF" if cur else rule, radius=4,
+                         extra=f' fill-opacity="{0.55 if cur else 1}"')
+        out.append(body)
+    return out
+
+
+def archive(ctx, el):
+    """原话档案：原话一条条接在账页末尾（只往后加）；到点上锁（不改一个字）；
+    整页合进最新一卷、和前几个月的书脊排成一排（按月分卷）；之后可抽出某一卷（出了问题再翻）。"""
+    cfg = el["archive"]
+    x, y, w, h = el.get("x", 2000), el.get("y", 540), el.get("w", 1600), el.get("h", 1240)
+    a, ink = ctx.col("accent"), ctx.col("ink")
+    t0 = ctx.at(el["at"])
+    entries = cfg["entries"]
+    rh, gap, head_h = cfg.get("row_h", 120), cfg.get("gap", 28), cfg.get("head_h", 190)
+    pw = cfg.get("page_w", w)
+    ph = min(h, head_h + len(entries) * (rh + gap) + 60)
+    page = [rect(0, 0, pw, ph, "#FFFFFF", radius=36, stroke=ctx.col("rule"), sw=4),
+            rect(0, 40, 18, ph - 80, a, radius=9)]
+    lab = []
+    if cfg.get("page_label"):
+        lab.append(label(ctx, cfg["page_label"], cfg.get("page_label_at") or el["at"], 80, 120, 84))
+    rows = []
+    for k, en in enumerate(entries):
+        at = ctx.at(en["at"])
+        ry = head_h + k * (rh + gap)
+        bub = _bubble(ctx, pw - 160, rh, True, en.get("lines", 1))
+        track = _track([[at, 0, 90, 1, 0], [at + 0.45, 0, 0, 1, 1]], "archive entry")
+        rows.append(f'<g transform="translate(80,{ry:g})">{B.keys(track, bub)}</g>')
+    lock = ""
+    if cfg.get("lock_at"):
+        la = ctx.at(cfg["lock_at"])
+        lock = (rect(-10, -10, pw + 20, ph + 20, "none", radius=44, stroke=a, sw=8,
+                     extra=f' data-anim="draw" data-delay="{la:.4f}" data-dur="0.5"')
+                + B.icon(ctx, "lock", pw - 120, 100, 120, la))
+    inner = B.anim("fade-up", t0, .5, "".join(page), ' data-shift="60"') + "".join(lab) + "".join(rows) + lock
+    labels = cfg.get("volumes", [])
+    nv = len(labels)
+    out = []
+    if nv:
+        va = ctx.at(cfg["volumes_at"])
+        sw_, sh_ = cfg.get("spine_w", 260), cfg.get("spine_h", min(860, h - 240))
+        sgap = cfg.get("spine_gap", 70)
+        total = nv * sw_ + (nv - 1) * sgap
+        x0 = x + (w - total) / 2
+        top = y + h - sh_ - 90
+        xs = [x0 + k * (sw_ + sgap) for k in range(nv)]
+        spines = _spines(ctx, xs, top, sw_, sh_, labels, nv - 1)
+        shelf = line(ctx, f"M{x:g},{top + sh_ + 30:g} L{x + w:g},{top + sh_ + 30:g}", va, .5, color="rule", sw=14)
+        pull = cfg.get("pull")
+        pk, pt = (pull.get("index", 0), ctx.at(pull["at"])) if pull else (None, None)
+        for k, sp in enumerate(spines):
+            d = va + 0.12 * k if k < nv - 1 else va + 0.45
+            if k == pk and pt < d + 0.45:
+                raise ValueError("archive pull must come after the volume is on the shelf")
+            body = (f'<rect data-anim="grow-bar" data-grow="y" data-delay="{d:.4f}" data-dur="0.45" x="{xs[k]:g}" '
+                    f'y="{top:g}" width="{sw_:g}" height="{sh_:g}" rx="22" fill="{a if k == nv - 1 else ctx.col("rule")}"/>'
+                    + B.anim("fade", d + 0.3, 0.25, sp))
+            if k == pk:
+                body = B.keys([[0, 0, 0, 1, 1], [pt, 0, 0, 1, 1], [pt + 0.45, 0, -150, 1, 1]], body)
+                body += rect(xs[k] - 16, top - 166, sw_ + 32, sh_ + 32, "none", radius=30, stroke=a, sw=9,
+                             extra=f' data-anim="draw" data-delay="{pt + 0.2:.4f}" data-dur="0.4"')
+            out.append(body)
+        # 账页合进最新一卷：缩到书脊位置并淡去，书脊接着长出来
+        s = sw_ / pw
+        cx_last = xs[-1]
+        track = _track([[0, 0, 0, 1, 1], [va + 0.05, 0, 0, 1, 1],
+                        [va + 0.5, cx_last - x, top - y, s, 0]], "archive close")
+        out.insert(0, shelf)
+        page_g = f'<g transform="translate({x:g},{y:g})">{B.keys(track, inner)}</g>'
+        return page_g + "".join(out)
+    return f'<g transform="translate({x:g},{y:g})">{inner}</g>'
+
+
+def fork(ctx, el):
+    """同一句回答，接在不同问题后面，意思不同：每行“问题 → 回答 → 意思”，回答从第一行复制到后面几行。"""
+    cfg = el["fork"]
+    x, y, w = el.get("x", 1960), el.get("y", 620), el.get("w", 1640)
+    a, ink, rule = ctx.col("accent"), ctx.col("ink"), ctx.col("rule")
+    rows = cfg["branches"]
+    rh, rgap = cfg.get("row_h", 190), cfg.get("row_gap", 330)
+    qw, aw = cfg.get("question_w", 640), cfg.get("answer_w", 440)
+    rw = w - qw - aw - 2 * cfg.get("link", 110)
+    ax = x + qw + cfg.get("link", 110)
+    rx = ax + aw + cfg.get("link", 110)
+    ans = cfg["answer"]
+    a_at = ctx.at(cfg["answer_at"])
+    a_glyphs = ctx.glyphs(B.plain_of(ans), cfg["answer_at"])
+    fs = cfg.get("size", round(rh * 0.5))
+    out = []
+    first_y = y
+    for k, br in enumerate(rows):
+        ry = y + k * (rh + rgap)
+        qt = ctx.at(br["at"])
+        q = rect(0, 0, qw, rh, "#FFFFFF", radius=rh / 2, stroke=rule)
+        q += circle(rh / 2, rh / 2, rh * 0.32, ink)
+        q += (f'<text x="{rh / 2:g}" y="{rh / 2 + rh * 0.11:g}" text-anchor="middle" font-family="{B.esc(ctx.font("mono"))}" '
+              f'font-size="{rh * 0.3:g}" font-weight="700" fill="#FFFFFF">AI</text>')
+        for j, f in enumerate((0.52, 0.34)):
+            q += rect(rh + 10, rh / 2 - 30 + j * 44, (qw - rh - 150) * f / 0.52, 18, ctx.col("faint"), radius=9,
+                      extra=' fill-opacity="0.6"')
+        q += (f'<text x="{qw - 80:g}" y="{rh / 2 + rh * 0.22:g}" text-anchor="middle" font-family="{B.esc(ctx.font("heavy"))}" '
+              f'font-size="{rh * 0.62:g}" font-weight="900" fill="{a}">？</text>')
+        out.append(f'<g transform="translate({x:g},{ry:g})">' + B.anim("fade-right", qt, .45, q, ' data-shift="60"') + '</g>')
+        if br.get("label"):
+            out.append(label(ctx, br["label"], br.get("label_at") or br["at"], x + 10, ry - 34, 60, font="mono",
+                             weight=700, fill="muted", settle=False))
+        # 回答：第一行在 answer_at 出现；后面几行从第一行复制下来
+        show = max(a_at, qt) if k == 0 else max(qt, a_at) + 0.1
+        chip = rect(0, 0, aw, rh, "#E6F4EF", radius=rh / 2, stroke=a, sw=5)
+        if k == 0:
+            txt = B.text(ctx, ans, aw / 2, rh / 2 + fs * 0.36, fs, a_glyphs, anchor="middle")
+            body = B.anim("pop", show, .4, chip) + txt
+            out.append(f'<g transform="translate({ax:g},{ry:g})">{body}</g>')
+        else:
+            txt = (f'<text x="{aw / 2:g}" y="{rh / 2 + fs * 0.36:g}" text-anchor="middle" font-family="{B.esc(ctx.font("heavy"))}" '
+                   f'font-size="{fs:g}" font-weight="900" fill="{ink}">{B.esc(B.plain_of(ans))}</text>')
+            track = _track([[show, 0, first_y - ry, 1, 0], [show + 0.05, 0, first_y - ry, 1, 1],
+                            [show + 0.6, 0, 0, 1, 1]], "fork answer")
+            out.append(f'<g transform="translate({ax:g},{ry:g})">{B.keys(track, chip + txt)}</g>')
+        lq = f"M{x + qw + 14:g},{ry + rh / 2:g} L{ax - 14:g},{ry + rh / 2:g}"
+        out.insert(0, line(ctx, lq, show + (0 if k == 0 else 0.5), .3, color="rule", sw=8))
+        # 意思
+        if br.get("result"):
+            rt = ctx.at(br["result_at"])
+            hot = br.get("accent", False)
+            res = rect(0, 0, rw, rh, a if hot else "#FFFFFF", radius=28, stroke=a if hot else ctx.col("faint"), sw=5)
+            rs = br.get("size", fs)
+            res += (f'<text x="{rw / 2:g}" y="{rh / 2 + rs * 0.36:g}" text-anchor="middle" font-family="{B.esc(ctx.font("heavy"))}" '
+                    f'font-size="{rs:g}" font-weight="900" fill="{"#FFFFFF" if hot else ink}">'
+                    f'{B.esc(br["result"])}</text>')
+            out.append(line(ctx, f"M{ax + aw + 14:g},{ry + rh / 2:g} L{rx - 24:g},{ry + rh / 2:g}", rt, .3,
+                            color="accent" if hot else "faint", sw=8,
+                            extra=' marker-end="url(#arrow)"' if cfg.get("arrows") else ""))
+            out.append(f'<g transform="translate({rx:g},{ry:g})">' + B.anim("pop", rt + 0.2, .4, res) + '</g>')
+    return "".join(out)
+
+
+def recall(ctx, el):
+    """动手之前自动翻档案：AI 要做的事一出来，就去原话档案里找同一件事的原话，飞到它眼前排好，
+    带着分类和出处；项目规矩也一起带上；禁令排到最前，不算数的划掉掉出去。"""
+    cfg = el["recall"]
+    a, ink, rule, muted = ctx.col("accent"), ctx.col("ink"), ctx.col("rule"), ctx.col("muted")
+    out = []
+    # ---- 左：做事的 AI 和它要做的事 --------------------------------------------------------------
+    ag = cfg.get("agent", {})
+    ax, ay = ag.get("x", 240), ag.get("y", 560)
+    aw_ = ag.get("w", 900)
+    t_agent = ctx.at(ag.get("at") or el["at"])
+    nx, ny, nr = ax + 110, ay + 110, 100
+    node = circle(nx, ny, nr, ink) + (f'<text x="{nx:g}" y="{ny + 26:g}" text-anchor="middle" '
+                                      f'font-family="{B.esc(ctx.font("mono"))}" font-size="72" font-weight="700" '
+                                      f'fill="#FFFFFF">AI</text>')
+    out.append(B.anim("pop", t_agent, .45, node))
+    if ag.get("label"):
+        out.append(label(ctx, ag["label"], ag.get("label_at") or ag.get("at") or el["at"], nx + nr + 50, ny + 30,
+                         ag.get("label_size", 84), font="sans", weight=800))
+    acts = cfg.get("actions", [])
+    ph, pgap = cfg.get("action_h", 150), cfg.get("action_gap", 36)
+    py0 = ay + 2 * nr + 120
+    times = [ctx.at(it["at"]) for it in acts]
+    for k, it in enumerate(acts):
+        py = py0 + k * (ph + pgap)
+        pw = aw_ - 60
+        t = times[k]
+        nxt = times[k + 1] if k + 1 < len(times) else None
+        pill = rect(ax + 30, py, pw, ph, "#FFFFFF", radius=ph / 2, stroke=rule, sw=4)
+        hot = rect(ax + 30, py, pw, ph, a, radius=ph / 2, extra=' fill-opacity="0.14"')
+        hot += rect(ax + 30, py, pw, ph, "none", radius=ph / 2, stroke=a, sw=6)
+        out.append(B.anim("fade-up", t, .4, pill, ' data-shift="40"'))
+        out.append(B.out_at(nxt, B.anim("fade", t, .25, hot), .3))
+        txt = it["text"]
+        out.append(B.text(ctx, txt, ax + 30 + 90, py + ph / 2 + 36, it.get("size", 100),
+                          ctx.glyphs(B.plain_of(txt), it["at"])))
+    task = cfg.get("task")
+    if task:
+        tt = ctx.at(task["at"])
+        fy = py0 - 90
+        fh = len(acts) * (ph + pgap) - pgap + 130
+        out.append(rect(ax, fy, aw_, fh, "none", radius=40, stroke=a, sw=8,
+                        extra=f' data-anim="draw" data-delay="{tt:.4f}" data-dur="0.5"'))
+        out.append(label(ctx, task["label"], task.get("label_at") or task["at"], ax + 30, fy + fh + 90, 72,
+                         font="mono", weight=700, fill="accent", settle=False))
+    # ---- 右：原话档案（按月的几卷） ----------------------------------------------------------------
+    ar = cfg["archive"]
+    zx, zy, zw = ar.get("x", 2700), ar.get("y", 560), ar.get("w", 900)
+    vols = ar.get("volumes", ["8月", "9月", "10月"])
+    nv = len(vols)
+    sw_, sgap = ar.get("spine_w", 240), ar.get("spine_gap", 50)
+    sh_ = ar.get("spine_h", 820)
+    x0 = zx + (zw - (nv * sw_ + (nv - 1) * sgap)) / 2
+    top = zy + 170
+    xs = [x0 + k * (sw_ + sgap) for k in range(nv)]
+    t_ar = ctx.at(ar["at"])
+    arch = [label(ctx, ar.get("label", "原话档案"), ar.get("label_at") or ar["at"], zx + zw / 2, zy + 84, 92,
+                  anchor="middle")]
+    arch.append(line(ctx, f"M{zx:g},{top + sh_ + 30:g} L{zx + zw:g},{top + sh_ + 30:g}", t_ar, .4, color="rule", sw=14))
+    for k, sp in enumerate(_spines(ctx, xs, top, sw_, sh_, vols, nv - 1, size=72)):
+        arch.append(B.anim("fade-up", t_ar + 0.1 * k, .4, sp, ' data-shift="60"'))
+    if ar.get("match_at"):       # 找到同一件事的原话：几卷依次亮一下
+        mt = ctx.at(ar["match_at"])
+        for k in range(nv):
+            arch.append(B.anim("pulse", mt + 0.12 * k, .4,
+                               rect(xs[k] - 14, top - 14, sw_ + 28, sh_ + 28, "none", radius=30, stroke=a, sw=8),
+                               ' data-amp="0.02" data-spd="5" data-opmin="0.35"'))
+    archive_g = "".join(arch)
+    # ---- 中：摆到眼前的原话 -------------------------------------------------------------------------
+    st = cfg.get("stack", {})
+    sx, sy0 = st.get("x", 1300), st.get("y", 560)
+    cw, ch, cgap = st.get("w", 1220), st.get("h", 190), st.get("gap", 34)
+    q = cfg.get("query")
+    if q:
+        qa = ctx.at(q["at"])
+        qy = q.get("y", sy0 + 2 * (ch + cgap) + ch / 2)
+        d = f"M{ax + aw_ + 20:g},{qy:g} L{zx - 30:g},{qy:g}"
+        beam = (f'<path d="{d}" fill="none" stroke="{a}" stroke-width="8" stroke-dasharray="6 26" stroke-linecap="round" '
+                f'data-anim="draw" data-delay="{qa:.4f}" data-dur="0.5"/>' + travelling_dot(ctx, d, qa + .3, 1.0, r=20, loop=True))
+        until = ctx.at(q["until"]) if q.get("until") else None
+        out.append(B.out_at(until, beam, .3))
+    items = cfg["items"]
+    arrivals = sorted(range(len(items)), key=lambda k: ctx.at(items[k]["at"]))
+    arr_slot = {k: n for n, k in enumerate(arrivals)}
+    ranks = cfg.get("order") or list(range(len(items)))
+    sort_t = ctx.at(cfg["sort_at"]) if cfg.get("sort_at") else None
+    drop_t = ctx.at(cfg["drop_at"]) if cfg.get("drop_at") else None
+    kept = [k for k in ranks if not items[k].get("strike_at")]
+    slot_y = lambda n: sy0 + n * (ch + cgap)  # noqa: E731
+    stack_layers = []
+    for k, it in enumerate(items):
+        t = ctx.at(it["at"])
+        y_arr = slot_y(arr_slot[k])
+        rule_card = it.get("kind") == "rules"
+        body = [rect(0, 0, cw, ch, "#FFFFFF", radius=30, stroke=ink if rule_card else rule, sw=5 if rule_card else 4)]
+        if rule_card:     # 项目规矩：文件夹图标 + 名字
+            body.append(f'<path d="M50,{ch * 0.3:g} h70 l20,22 h90 v{ch * 0.42:g} h-180 Z" fill="none" stroke="{ink}" '
+                        f'stroke-width="9" stroke-linejoin="round"/>')
+            body.append(B.text(ctx, it["text"], 280, ch / 2 + 36, it.get("size", 96),
+                               ctx.glyphs(B.plain_of(it["text"]), it.get("text_at") or it["at"])))
+        else:
+            body.append(rect(0, 30, 14, ch - 60, a, radius=7))
+            body.append(f'<text x="44" y="{ch * 0.66:g}" font-family="{B.esc(ctx.font("heavy"))}" font-size="{ch * 0.7:g}" '
+                        f'font-weight="900" fill="{a}">“</text>')
+            body.append(rect(150, ch * 0.3, (cw - 600) * it.get("w", 0.8), 26, a, radius=13, extra=' fill-opacity="0.38"'))
+            if it.get("src"):
+                body.append(B.text(ctx, it["src"], 150, ch * 0.8, st.get("src_size", 58),
+                                   ctx.glyphs(it["src"], it.get("src_at"), start=None if it.get("src_at") else t + .3),
+                                   font="mono", weight=700, fill="muted", settle=False))
+            if it.get("tag"):
+                ta = ctx.at(it["tag_at"]) if it.get("tag_at") else t + .4
+                hot = it.get("accent", False)
+                tw, th_ = st.get("tag_w", 280), st.get("tag_h", 124)
+                chip = rect(cw - tw - 50, ch / 2 - th_ / 2, tw, th_, a if hot else "#FFFFFF", radius=th_ / 2,
+                            stroke=a if hot else ctx.col("faint"), sw=5)
+                ts = st.get("tag_size", 84)
+                chip += (f'<text x="{cw - tw / 2 - 50:g}" y="{ch / 2 + ts * 0.36:g}" text-anchor="middle" '
+                         f'font-family="{B.esc(ctx.font("heavy"))}" font-size="{ts}" font-weight="900" '
+                         f'fill="{"#FFFFFF" if hot else ink}">{B.esc(it["tag"])}</text>')
+                body.append(B.anim("pop", ta, .35, chip))
+        strike = it.get("strike_at")
+        if strike:
+            s_t = ctx.at(strike)
+            body.append(line(ctx, f"M40,{ch / 2:g} L{cw - 40:g},{ch / 2:g}", s_t, .3, color="ink", sw=12))
+        inner = "".join(body)
+        # 轨迹：从档案里那一卷（或从下方）飞来 → 到点按排名换位 → 划掉的变淡、掉出；其余往上并拢
+        if rule_card:
+            track = [[t, 0, 160, 1, 0], [t + 0.5, 0, 0, 1, 1]]
+        else:
+            v = it.get("volume", nv - 1)
+            vx = xs[v] + sw_ / 2 - cw * 0.12 - sx
+            vy = top + sh_ * 0.35 - y_arr
+            track = [[t, vx, vy, 0.24, 0], [t + 0.12, vx, vy, 0.24, 1], [t + 0.75, 0, 0, 1, 1]]
+        cur = 0
+        if sort_t is not None:
+            dy = slot_y(ranks.index(k)) - y_arr
+            track += [[sort_t, 0, cur, 1, 1], [sort_t + 0.55, 0, dy, 1, 1]]
+            cur = dy
+        if strike:
+            track += [[s_t, 0, cur, 1, 1], [s_t + 0.35, 0, cur, 1, 0.45]]
+            if drop_t is not None:
+                track += [[drop_t, 0, cur, 1, 0.45], [drop_t + 0.5, 0, cur + 140, 1, 0]]
+        elif drop_t is not None:
+            dy = slot_y(kept.index(k)) - y_arr
+            track += [[drop_t + 0.1, 0, cur, 1, 1], [drop_t + 0.6, 0, dy, 1, 1]]
+        track = _track(track, f"recall item {k}")
+        stack_layers.append(f'<g transform="translate({sx:g},{y_arr:g})">{B.keys(track, inner)}</g>')
+    if ar.get("exit_at"):
+        archive_g = B.out_at(ctx.at(ar["exit_at"]), archive_g, .35)
+    out.append(archive_g)
+    out.extend(stack_layers)
+    if cfg.get("seen_at"):
+        se = ctx.at(cfg["seen_at"])
+        out.append(B.icon(ctx, "eye", nx + nr + 200, ny, 170, se))
+        n_kept = len(kept) if drop_t is not None else len(items)
+        hh = n_kept * (ch + cgap) - cgap
+        out.append(rect(sx - 30, sy0 - 30, cw + 60, hh + 60, "none", radius=46, stroke=a, sw=8,
+                        extra=f' data-anim="draw" data-delay="{se:.4f}" data-dur="0.5"'))
+    return "".join(out)
+
+
 KINDS = {"screenshot": screenshot_stamp, "repeat_flow": repeat_flow, "focus_network": focus_network,
          "time_stretch": time_stretch, "scan_grid": scan_grid, "capacity_gauges": capacity_gauges,
          "device_flow": device_flow, "condense": condense, "cross_check": cross_check, "lanes": lanes,
-         "rail": rail, "screen": screen, "desc_links": desc_links, "sanlian": sanlian, "tree": tree, "handoff": handoff, "layers": layers, "gate": gate, "verdict": verdict}
+         "rail": rail, "screen": screen, "desc_links": desc_links, "sanlian": sanlian, "tree": tree, "handoff": handoff, "layers": layers, "gate": gate, "verdict": verdict, "archive": archive, "fork": fork, "recall": recall}
