@@ -846,6 +846,11 @@ def tiles(ctx, el):
                 st = ctx.at(it["strike_at"])
                 parts.append(mark_rect(tid, 0, len(plain_of(title)), st, it.get("strike_dur", 0.28),
                                        ctx.col("muted"), "strike"))
+            if it.get("logo"):   # 卡片代表某一方：标题右侧放标志，和标题一起出现
+                lr = it.get("logo_r", size * 0.5)
+                la = ctx.at(it["logo_at"]) if it.get("logo_at") else min(tt)
+                parts.append(anim("pop", la, 0.4, brand_mark(ctx, it["logo"], w - pad * 0.7 - lr,
+                                                             baseline - size * 0.36, lr)))
         ly = baseline
         for line in lines:
             fs = line.get("size", 100)

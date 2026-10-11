@@ -572,14 +572,24 @@ def rail(ctx, el):
             out.append(B.anim("fade", t0, .25, circle(xs[k], y, 16, "#FFFFFF", stroke=faint, sw=6)))
             continue
         when = ctx.at(st["at"]) if st.get("at") else (go if (k == cur and go is not None) else t0)
+        logo = st.get("logo")
         if k < cur:
-            out.append(B.anim("fade", min(when, t0) if not st.get("at") else when, .25, circle(xs[k], y, 20, ink)))
-            g = ctx.glyphs(st["label"], st.get("at"), start=None if st.get("at") else when)
+            dot = (B.brand_mark(ctx, logo, xs[k], y, el.get("logo_r", 34) * .8, sw=4) if logo
+                   else circle(xs[k], y, 20, ink))
+            out.append(B.anim("fade", min(when, t0) if not st.get("at") else when, .25, dot))
+            # 讲过的步骤：名字早已念过，跟着点直接打出，不去后文里找同名的字
+            g = (ctx.glyphs(st["label"], st["at"]) if st.get("at") else
+                 [round(min(when, t0) + B.TYPE_STEP * i, 4) for i in range(len(st["label"]))])
             out.append(B.text(ctx, st["label"], xs[k], y + 100, 58, g, font="sans", weight=700, fill="muted",
                               anchor="middle", settle=False))
         else:
-            out.append(B.anim("pop", when, .35, circle(xs[k], y, 30, a)))
-            out.append(pulse(ctx, xs[k], y, 54, when + .35))
+            lr = el.get("logo_r", 34) * 1.25
+            if logo:    # 这一步代表某一方：当前点换成描绿圈的标志
+                out.append(pulse(ctx, xs[k], y, lr * 1.6, when + .35))
+                out.append(B.anim("pop", when, .35, B.brand_mark(ctx, logo, xs[k], y, lr, ring="accent", sw=6)))
+            else:
+                out.append(B.anim("pop", when, .35, circle(xs[k], y, 30, a)))
+                out.append(pulse(ctx, xs[k], y, 54, when + .35))
             g = ctx.glyphs(st["label"], st.get("at"), start=None if st.get("at") else when)
             out.append(B.text(ctx, st["label"], xs[k], y + 100, 62, g, font="sans", weight=800, fill="accent",
                               anchor="middle", settle=False))
@@ -856,7 +866,90 @@ def sanlian(ctx, el):
     return "".join(out)
 
 
+def tree(ctx, el):
+    """分派树：一个节点按念到往下分出子节点，一层层拆开；结果沿连线流回顶上，顶上只收最后的结果。
+    节点 {at, label?, logo?, children?}；`return_at` 结果点从最底层逐层往上流，`fold_at` 中间层变淡，
+    `result: {text, at}` 在根节点旁弹出结果卡。"""
+    root = el["tree"]
+    x, y, w = el.get("x", 2000), el.get("y", 700), el.get("w", 1600)
+    gap = el.get("level_gap", 330)
+    radii = el.get("node_r", [120, 92, 56, 36])
+    a, ink, rule = ctx.col("accent"), ctx.col("ink"), ctx.col("rule")
+    nodes, edges = [], []
+
+    def leaves(n):
+        return max(1, sum(leaves(c) for c in n.get("children", [])))
+
+    def place(n, depth, left, span, parent):
+        nx, ny = left + span / 2, y + depth * gap
+        nr = radii[min(depth, len(radii) - 1)]
+        at = ctx.at(n["at"])
+        nodes.append((n, depth, nx, ny, nr, at))
+        if parent is not None:
+            px, py, pr = parent
+            edges.append((depth, at, f'M{px:g},{py + pr:g} C{px:g},{(py + ny) / 2:g} {nx:g},{(py + ny) / 2:g} '
+                                     f'{nx:g},{ny - nr:g}',
+                          f'M{nx:g},{ny - nr:g} C{nx:g},{(py + ny) / 2:g} {px:g},{(py + ny) / 2:g} '
+                          f'{px:g},{py + pr:g}'))
+        cs = n.get("children", [])
+        total = sum(leaves(c) for c in cs)
+        cur = left
+        for c in cs:
+            cw = span * leaves(c) / total
+            place(c, depth + 1, cur, cw, (nx, ny, nr))
+            cur += cw
+
+    place(root, 0, x, w, None)
+    deepest = max(d for _, d, *_ in nodes)
+    fold = ctx.at(el["fold_at"]) if el.get("fold_at") else None
+    back = ctx.at(el["return_at"]) if el.get("return_at") else None
+    step = el.get("return_step", 0.45)
+    lower, upper = [], []
+    for depth, at, d, rev in edges:
+        seg = line(ctx, d, at, .35, color="rule", sw=6 if depth > 1 else 8)
+        (lower if depth > 1 else upper).append(seg)
+        if back is not None:     # 结果从最底层先走，逐层往上
+            ta = back + (deepest - depth) * step
+            dot = travelling_dot(ctx, rev, ta, step, r=13 if depth > 1 else 18)
+            upper.append(B.out_at(ta + step + .27, dot, .15))   # 到达后停一下再消失
+    for n, depth, nx, ny, nr, at in nodes:
+        logo = n.get("logo")
+        if logo:
+            body = B.brand_mark(ctx, logo, nx, ny, nr, ring="accent" if depth == 0 else "rule",
+                                sw=max(4, nr * .06))
+        else:
+            body = circle(nx, ny, nr, ink if depth == 0 else "#FFFFFF", stroke=ink if depth else "none",
+                          sw=max(4, nr * .1))
+        svg = B.anim("pop", at + .2, .35, body)
+        if n.get("label"):
+            fs = n.get("size", 76 if depth < 2 else 60)
+            svg += label(ctx, n["label"], n.get("label_at") or n["at"], nx, ny + nr + fs * 1.15, fs,
+                         anchor="middle", font="sans", weight=800 if depth == 0 else 700, settle=False)
+        (upper if depth <= 1 else lower).append(svg)
+        if depth == 0:
+            upper.append(pulse(ctx, nx, ny, nr * 1.35, at + .55))
+    low = "".join(lower)
+    if fold is not None:     # 中间过程变淡：顶上只看结果
+        low = B.keys([[0, 0, 0, 1, 1], [fold, 0, 0, 1, 1], [fold + .4, 0, 0, 1, .3]], low)
+    out = [low, "".join(upper)]
+    res = el.get("result")
+    if res:
+        _, _, rx, ry, rr, _ = nodes[0]
+        ra = ctx.at(res["at"])
+        fs = res.get("size", 72)
+        cw = ctx.width(res["text"], fs) + 200
+        bx, by = rx + rr + 70, ry - 70
+        chip = rect(bx, by, cw, 140, "#FFFFFF", radius=70, stroke=a, sw=6) + B.text(
+            ctx, res["text"], bx + 130, by + 70 + fs * .36, fs, ctx.glyphs(res["text"], res["at"]),
+            font="sans", weight=800, settle=False)
+        out.append(B.anim("fade-right", ra, .4, chip, ' data-shift="50"'))
+        out.append(B.anim("pop", ra + .1, .3, circle(bx + 70, by + 70, 34, a, extra=' fill-opacity="0.15"'))
+                   + line(ctx, f'M{bx + 52:g},{by + 70:g} L{bx + 66:g},{by + 86:g} L{bx + 92:g},{by + 54:g}',
+                          ra + .2, .3, sw=9))
+    return "".join(out)
+
+
 KINDS = {"screenshot": screenshot_stamp, "repeat_flow": repeat_flow, "focus_network": focus_network,
          "time_stretch": time_stretch, "scan_grid": scan_grid, "capacity_gauges": capacity_gauges,
          "device_flow": device_flow, "condense": condense, "cross_check": cross_check, "lanes": lanes,
-         "rail": rail, "screen": screen, "desc_links": desc_links, "sanlian": sanlian}
+         "rail": rail, "screen": screen, "desc_links": desc_links, "sanlian": sanlian, "tree": tree}

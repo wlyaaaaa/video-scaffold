@@ -236,6 +236,38 @@ class DiagramTests(unittest.TestCase):
                                                     self.tl.duration + 2) if not f[4]]
                 self.assertIn("frames", [f[0] for f in late])
 
+    def test_tree_tiles_and_rail_logos_finish_and_stay_on_time(self):
+        """分派树、卡片网格和进度轨的标志：字不早于念到，动画放完；讲过的步骤名不等后文同名字才出。"""
+        with tempfile.TemporaryDirectory() as d:
+            Image.new("RGBA", (64, 64), (200, 100, 60, 255)).save(Path(d) / "brand.png")
+            builder = pages.PageBuilder(self.tl, {"elements": []}, 0, 0, Path(d), end=self.tl.duration,
+                                        brands={"x": "brand.png"})
+            for el in [
+                {"tree": {"at": "同一个要求", "label": "注意力", "logo": "x", "children": [
+                    {"at": "好几遍", "label": "最后一句", "logo": "x", "children": [{"at": "一个小时"}, {"at": "一整天"}]},
+                    {"at": "毛病", "children": [{"at": "流量"}]}]},
+                 "fold_at": "全打满", "return_at": "注意力", "result": {"text": "更全面", "at": "更全面"}},
+                {"tiles": [{"title": "毛病", "at": "毛病", "logo": "x"}, {"title": "流量", "at": "流量"}]},
+                {"rail": [{"label": "清手机", "logo": "x"}, {"label": "换电脑", "logo": "x"}], "current": 1,
+                 "at": "毛病"},
+            ]:
+                builder.element(el)
+            frag = "".join(builder.out + builder.mout)
+        root = parse_fragment(frag)
+        self.assertEqual(len([n for n in root.iter() if n.tag.endswith("image")]), 5)
+        for el in root.iter():
+            txt = "".join(el.itertext())
+            if not el.get("data-glyph-times") or TEXT.find(txt) < 0:
+                continue
+            idx = TEXT.find(txt)
+            for k, at in enumerate(json.loads(el.get("data-glyph-times"))):
+                ct = self.tl.char_time(idx + k)
+                if ct is not None and txt != "清手机":
+                    self.assertGreaterEqual(at + 1e-6, ct, txt)
+        done = next(el for el in root.iter() if el.get("data-glyph-times") and "".join(el.itertext()) == "清手机")
+        self.assertLess(max(json.loads(done.get("data-glyph-times"))), pages.cue_time(self.tl, "清手机", 0)[0])
+        self.assertEqual([f for f in pages.unfinished(frag, self.tl.duration + 2) if not f[4]], [])
+
     def test_bad_time_range_fails(self):
         with self.assertRaises(ValueError):
             self.build([{"time_stretch": {"start_label": "一个小时", "stretch_at": "一整天",
