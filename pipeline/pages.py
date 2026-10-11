@@ -206,11 +206,11 @@ class PageBuilder:
         self.glyph_sources = {}
         self._glyph_arrays = {}
 
-    def glyph_reference(self, plain, cue=None, summary=False):
+    def glyph_reference(self, plain, cue=None, summary=False, replay_at=None):
         """独立从原文定位字的实际念出时间，不使用生成器给出的出字时间。"""
         refs = [None] * len(plain)
         core = plain.strip('“”"「」 ')
-        if summary or not core:
+        if (summary and replay_at is None) or not core:
             return refs
         anchor = cue_time(self.tl, cue, self.pos)[1] if cue else self.pos
         matches = [m.start() for m in re.finditer('(?=' + re.escape(core) + ')', self.tl.text)]
@@ -220,6 +220,12 @@ class PageBuilder:
             self.tl.char_time(q) is None or self.tl.char_time(q) <= self.start
             for q in range(p, p + len(core)))]
         choices = containing or past or [p for p in current if p >= anchor] or current
+        if replay_at is not None:
+            choices = [p for p in matches if all(not self.tl.text[q].isalnum() or (
+                self.tl.char_time(q) is not None and self.tl.char_time(q) <= replay_at)
+                for q in range(p, p + len(core)))]
+            if not choices:
+                raise ValueError(f'重现文字“{core}”在 {replay_at:.3f}s 前尚未完整念过')
         if not choices:
             return refs                       # 完整字样不在原文中，是概括，不逐个散字猜匹配
         pos, lead = choices[0], plain.find(core)
@@ -228,9 +234,10 @@ class PageBuilder:
                 refs[lead + k] = self.tl.char_time(pos + k)
         return refs
 
-    def record_glyphs(self, plain, cue, start, summary, times=None):
+    def record_glyphs(self, plain, cue, start, summary, times=None, *, replay=False):
         if times is not None:
-            self._glyph_arrays[id(times)] = (times, self.glyph_reference(plain, cue, summary))
+            at = self.start + (start or 0) if replay else None
+            self._glyph_arrays[id(times)] = (times, self.glyph_reference(plain, cue, summary, at))
         return times
 
     def record_glyph_join(self, times, added):

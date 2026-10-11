@@ -77,6 +77,10 @@ class PageGuardsTests(unittest.TestCase):
         self.assertEqual([], list(pages.early_glyphs(boards.text(ctx, '甲乙', 0, 1, 100, times), b)))
         replay = pages.PageBuilder(timeline('甲乙甲'), {'elements': []}, 1, 1, None)
         self.assertEqual([0], replay.glyph_reference('甲'))
+        times = replay.record_glyphs('甲', '甲', 0, False, [0], replay=True)
+        self.assertEqual([], list(pages.early_glyphs(boards.text(boards.Ctx(replay), '甲', 0, 0, 100, times), replay)))
+        with self.assertRaisesRegex(ValueError, '尚未完整念过'):
+            b.record_glyphs('乙', '乙', 0, False, [0], replay=True)
 
     def test_joined_cues_keep_occurrence_and_keys_hidden_intervals(self):
         b = pages.PageBuilder(timeline('甲乙乙'), {'elements': [
