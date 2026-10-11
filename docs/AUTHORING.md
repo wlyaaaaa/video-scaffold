@@ -95,16 +95,16 @@
 - `anim`、`dur`、`shift` 可覆盖入场；`exit_at`、`exit_dur` 安排离场。照片 `hold: false` 关闭轻推近，`zoom` 改推近比例；抠图 `ambient: false` 关闭轻浮动。`bars` 的 `dur` 控制条形和数字，`label_at` 单独绑定标签。原始文字、单位和未来数值要分别按词轴组织。
 - 复杂、一次性的主视觉写在本期静态 SVG，元素用 `fragment: "visual.svg"` 接入。片段可直接用现有原语和 `data-cue`、`data-cue-index`、非负 `data-cue-offset`，分镜表统一解析成本页秒数；找不到的词仍失败。图表、流程和准确文字用代码；写实素材用生图，全部在本期目录保存。
 
-**通用版式（动态图形，`pipeline/boards.py`）。** 下面几种元素各自是一整块会动的版式，绝对定位、带默认坐标，按词轴安排每个动作；一页可以叠几种，用 `exit_at` 让一组退场，用 `wipe` 换段落。所有字都逐字出现：原文里有的字用各自被念到的时刻，概括字样（卡片标题、标签）从绑定的词起快速打出。
+**通用版式（动态图形，`pipeline/boards.py`）。** 下面几种元素各自是一整块会动的版式，绝对定位、带默认坐标，按词轴安排每个动作；一页可以叠几种，用 `exit_at` 让一组退场，用 `wipe` 换段落。所有字都逐字出现：原文里有的字用各自被念到的时刻，概括字样（卡片标题、标签）从绑定的词起快速打出；本页结束后才念到的字（如别处才提到的名字）在本页也按概括字样打出。
 
 | 元素 | 画面与动作 | 主要字段 |
 |---|---|---|
 | `head` | 左上粗体小标题逐字打出，后跟绿色胶囊标签弹出，下一行灰色小字可分段出现 | `head`、`at`、`kicker`/`kicker_at`、`tag`/`tag_at`、`sub`（字符串或 `[[字, 绑词], …]`） |
 | `claims` | 说法堆叠：当前说法大字逐字出现，重点被绿色划过（底色条 + 逐字变绿）；下一句来时旧说法缩小上移成一摞；到 `strike` 时变灰并划线。`quote: true` 加引号，`*…*` 整句绿色 | `claims: [{text, at, mark, mark_at, strike, size, quote}]`、`y`、`size`、`stack_y` |
 | `deck` | 右侧卡片组：一张接一张替换（旧卡淡出上移，新卡升起；`enter` 可选 `rise`/`pop`/`drop`/`iris`）。卡内：等宽小标签、标题（右侧可配动态图标 `icon`）、内容块 | `deck: [{at, label, title, title_at, icon, icon_at, body, frame, pad, enter}]`、`x`/`y`/`w`/`h` |
-| 卡片内容 `body` | `photo`（照片缓慢推近，`bleed` 铺满卡片）、`wave`（说话声波，`at`–`until`）、`grid`（方块逐个出现，`flip` 到点变黑）、`comments`（短评论气泡逐条弹出）；`pipeline/board_bodies.py` 另有 `chat`（对话气泡，可描框/加注/变淡）、`dial`（表盘：说好的时长→拖满一圈）、`scan`（人一眼圈出毛病、扫描带扫过）、`gauges`（容量槽依次涨、全满变黑一震）、`ring`（注意力从一点扫满一圈）、`bar`（进度条涨或退）、`flow`（点从左框流到右框）、`terminal`（代码行依次写出）、`inspect`（一排排看着都对、逐行打勾，放大镜移到一行，那行原来不对：`rows`、`tick_at`、`lens_at`、`wrong_at`、`target`）、`todo`（任务单逐条列出、打勾；某条 `drop_at` 划掉掉落，`ghost_at` 留虚线空位，`restore_at` 补回；`absent` 一开始就不在；`scan_at` 扫描带扫过）、`level`（水位条按 `steps: [[绑词, 比例, 时长?, 颜色?]]` 一段段涨，碰 `limit` 虚线时 `hit_at` 一震，`blind_at` 盖上划掉的眼睛表示“看不到”）。要人拍板的网页用三块拼：`choice`（选择题：`question`、`options: [{text, at, sub|sub_bar}]`，`rec`/`rec_at` 描绿框加“推荐”标签，`pick`/`pick_at` 鼠标滑进来点选，`media` 在题里放图片/视频缩略图）、`field`（留一个框：`label`、`at`，`text`/`text_at` 写进说明或占位横线，光标闪）、`button`（按钮：`text`、`at`，`press_at` 鼠标点下变实绿）；`menu`（下拉菜单：`items` 可含 `{header}` 小标题，`picks: [[第几项, 绑词], …]` 高亮条在几项间移动）。卡片标题图标另有 `check`、`hook`、`eye`、`lock`、`swap`（两支反向箭头）；`grid` 可写 `glyph: "image"`（图片占位）、`center: true`，`ring`/`ring_at` 到点圈出几格（抽出来的几张），`dim`/`dim_at` 到点变淡几格（筛掉的） | 每块 `{kind, …}` |
+| 卡片内容 `body` | `photo`（照片缓慢推近，`bleed` 铺满卡片）、`wave`（说话声波，`at`–`until`）、`grid`（方块逐个出现，`flip` 到点变黑）、`comments`（短评论气泡逐条弹出）；`pipeline/board_bodies.py` 另有 `chat`（对话气泡，可描框/加注/变淡）、`dial`（表盘：说好的时长→拖满一圈）、`scan`（人一眼圈出毛病、扫描带扫过）、`gauges`（容量槽依次涨、全满变黑一震）、`ring`（注意力从一点扫满一圈）、`bar`（进度条涨或退）、`flow`（点从左框流到右框）、`terminal`（代码行依次写出，`rows` 可指定真字和逐行绑词）、`toggle`（开关拨动，`off_at`/`on_at`）、`inspect`（一排排看着都对、逐行打勾，放大镜移到一行，那行原来不对：`rows`、`tick_at`、`lens_at`、`wrong_at`、`target`）、`todo`（任务单逐条列出、打勾；某条 `drop_at` 划掉掉落，`ghost_at` 留虚线空位，`restore_at` 补回；`absent` 一开始就不在；`scan_at` 扫描带扫过）、`level`（水位条按 `steps: [[绑词, 比例, 时长?, 颜色?]]` 一段段涨，碰 `limit` 虚线时 `hit_at` 一震，`blind_at` 盖上划掉的眼睛表示“看不到”）。要人拍板的网页用三块拼：`choice`（选择题：`question`、`options: [{text, at, sub|sub_bar}]`，`rec`/`rec_at` 描绿框加“推荐”标签，`pick`/`pick_at` 鼠标滑进来点选，`media` 在题里放图片/视频缩略图）、`field`（留一个框：`label`、`at`，`text`/`text_at` 写进说明或占位横线，光标闪）、`button`（按钮：`text`、`at`，`press_at` 鼠标点下变实绿）；`menu`（下拉菜单：`items` 可含 `{header}` 小标题，`picks: [[第几项, 绑词], …]` 高亮条在几项间移动）。卡片标题图标另有 `check`、`hook`、`eye`、`lock`、`swap`（两支反向箭头）；`grid` 可写 `glyph: "image"`（图片占位）、`center: true`，`ring`/`ring_at` 到点圈出几格（抽出来的几张），`dim`/`dim_at` 到点变淡几格（筛掉的） | 每块 `{kind, …}` |
 | `cards` | 一排（或一张）固定卡片，各自到点升起、一直留着，卡内同 `deck` | `cards: [卡…]`、`x`/`y`/`w`/`h`/`gap` |
-| `tiles` | 分类网格、并列对照或逐项清单；卡片按词轴进入，可移位、加锁、划线或变淡 | `tiles: [{title, at, title_at?, size?, lines: [{text, at, size?, color?, gap?}], dark?, accent?, focus_at?, lock_at?, strike_at?, dim_at?, move_at?, move_to: [x,y]}]`；`cols`、`x/y/w/h/gap` 控制网格，`w/h` 是每张卡的大小 |
+| `tiles` | 分类网格、并列对照或逐项清单；卡片按词轴进入，可移位、加锁、划线或变淡；某一行可到点划掉 | `tiles: [{title, at, title_at?, size?, lines: [{text, at, size?, color?, gap?, strike_at?}], dark?, accent?, focus_at?, lock_at?, strike_at?, dim_at?, move_at?, move_to: [x,y]}]`；`cols`、`x/y/w/h/gap` 控制网格，`w/h` 是每张卡的大小 |
 | 卡片内容 `context_stack` | 对话条保持固定位置，最新一条突出；旧条目可淡去、聚拢到窗口中 | `body: [{kind: "context_stack", items: [{at, text?, text_at?, size?, dim_at?}], window_at?, collapse_at?, h?}]`；文字仍使用逐字词轴，聚拢为可完成并检查的有限动画 |
 | `timeline` | 细轴画出、刻度依次弹出；节点按念到弹出，最新节点绿色呼吸；`trace` 让一个点沿轴走过去，刻度随之变绿 | `timeline: [{label, at, x, anchor, sub}]`、`y`、`trace: {from, to, at, until}` |
 | `checklist` | 清单逐条出现，每条配会动的图标（`bolt` 呼吸、`wander` 点沿弯路走、`burst` 冲击波、`math` 描线、`quote`）；绿色指示条跟着念到的那条走，旧条变淡 | `checklist: [{text, at, icon, pre, pre_at}]`、`focus` |
@@ -121,7 +121,7 @@
 
 | 元素 | 动作与主要字段 |
 |---|---|
-| `screenshot` | 值为完整原截图路径；按 `at` 平移落入、轻微缩放压实。`x/y/w` 定位置和宽度，高度按原图比例计算；不裁切、不改像素、不重画内容。`focus: [x,y,w,h]` 是原图归一化区域，只叠加描边；`focus_at` 单独定强调时刻，`caption/caption_at` 可加图外说明。整张截图在关联内容念到后才出现。 |
+| `screenshot` | 值为完整原截图路径；按 `at` 平移落入、轻微缩放压实。`x/y/w` 定位置和宽度，高度按原图比例计算；不裁切、不改像素、不重画内容。`focus: [x,y,w,h]` 是原图归一化区域，只叠加描边；`focus_at` 单独定强调时刻；要框几处时写 `focus: [[x,y,w,h,绑词], …]`，按各自绑词依次描出，`caption/caption_at` 可加图外说明。整张截图在关联内容念到后才出现。 |
 | `repeat_flow` | `{input, repeats: [绑词,…], result, result_at}`：相同输入卡片逐次汇入同一输出；`x/y` 调整整组。适合反复沟通、重试、结果未变。 |
 | `focus_network` | `{center?, nodes: [{label?, at?, angle?, label_offset?, size?}], visits: [{node, at}], expand_at?}`：注意点沿关系移动，或从一个节点扩展到所有节点。`x/y/r` 为中心与半径；无标签节点仅作图形，标签仍独立绑定词轴。 |
 | `time_stretch` | `{start_label, stretch_at, end_label, end_at, units?}`：圆周计时与单位格展开同步；`x/y/w` 调整区域。`end_at` 必须晚于 `stretch_at`，`units` 默认 24，可按真实含义改。 |

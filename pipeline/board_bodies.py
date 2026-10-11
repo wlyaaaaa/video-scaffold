@@ -17,10 +17,12 @@ def _t(ctx, part, key, default):
     return ctx.at(part[key]) if part.get(key) else default
 
 
-# ---- 终端：几行代码条依次写出，末尾光标闪动 -----------------------------------------------------
+# ---- 终端：几行代码条依次写出，末尾光标闪动；写 rows 时是真字（命令、输出）逐字打出 --------------------------
 def terminal(ctx, part, x, top, w, room, pad, t0):
     a, block, rule = ctx.col("accent"), ctx.col("block"), ctx.col("rule")
     at = _t(ctx, part, "at", t0 + 0.2)
+    if part.get("rows"):
+        return _terminal_rows(ctx, part, x, top, w, pad, at)
     n = part.get("lines", 5)
     widths = part.get("widths") or [0.62, 0.84, 0.48, 0.73, 0.38, 0.66, 0.55][:n]
     lh, bar = part.get("line_h", 74), part.get("bar", 26)
@@ -41,6 +43,69 @@ def terminal(ctx, part, x, top, w, room, pad, t0):
     out.append(f'<g data-anim="pulse" data-delay="{_r(at + n * step)}" data-dur="0.2" data-amp="0" data-spd="9" '
                f'data-opmin="0"><rect x="{_r(cx)}" y="{_r(cy - 6)}" width="22" height="{bar + 12}" fill="{a}"/></g>')
     return "".join(out), n * lh + 110
+
+
+def _terminal_rows(ctx, part, x, top, w, pad, at):
+    """rows: [{text, at?, color?, prompt?}]：每行从自己的 at（默认接着上一行打完）逐字打出，等宽字。"""
+    rows = part["rows"]
+    size = part.get("size", 60)
+    lh = part.get("line_h", size * 1.55)
+    x0 = x + pad
+    out = [f'<rect x="{_r(x0 - 30)}" y="{_r(top)}" width="{_r(w - 2 * pad + 60)}" height="{_r(len(rows) * lh + 80)}" '
+           f'rx="22" fill="{ctx.col("ink")}"/>']
+    t = at
+    for k, row in enumerate(rows):
+        t = ctx.at(row["at"]) if row.get("at") else (t if k == 0 else t + part.get("gap", 0.18))
+        ly = top + 40 + (k + 0.75) * lh
+        s = ("› " if row.get("prompt") else "") + row["text"]
+        g = ctx.glyphs(s, start=t)
+        out.append(B.text(ctx, s, x0, ly, size, g, font="mono", weight=700, fill=row.get("color", "#FFFFFF"),
+                          settle=False))
+        t = max(g)
+    cy = top + 40 + (len(rows) - 0.25) * lh
+    out.append(f'<g data-anim="pulse" data-delay="{_r(t + 0.1)}" data-dur="0.2" data-amp="0" data-spd="9" '
+               f'data-opmin="0"><rect x="{_r(x + w - pad - 40)}" y="{_r(cy - size * 0.8)}" width="20" '
+               f'height="{_r(size)}" fill="{ctx.col("accent")}"/></g>')
+    return "".join(out), len(rows) * lh + 120
+
+
+# ---- 开关：开着（绿底、圆钮在右），到点拨到关（灰底、圆钮滑到左），右侧小字从“开”换成“关” ---------------
+def toggle(ctx, part, x, top, w, room, pad, t0):
+    a, faint, ink = ctx.col("accent"), ctx.col("faint"), ctx.col("ink")
+    on = _t(ctx, part, "at", t0 + 0.2)
+    off = _t(ctx, part, "off_at", None)
+    th = part.get("h", 150)
+    tw = th * 1.9
+    x0, y0 = x + pad, top + 30
+    r = th / 2
+    kr = r - 14
+    out = []
+    if part.get("label"):
+        g = ctx.glyphs(part["label"], part.get("label_at"), start=None if part.get("label_at") else on)
+        out.append(B.text(ctx, part["label"], x0 + tw + 70, y0 + r + 30, part.get("size", 84), g, font="sans",
+                          weight=700))
+    track_on = f'<rect x="{_r(x0)}" y="{_r(y0)}" width="{_r(tw)}" height="{_r(th)}" rx="{_r(r)}" fill="{a}"/>'
+    track_off = f'<rect x="{_r(x0)}" y="{_r(y0)}" width="{_r(tw)}" height="{_r(th)}" rx="{_r(r)}" fill="{faint}"/>'
+    knob = (f'<circle cx="{_r(x0 + tw - r)}" cy="{_r(y0 + r)}" r="{_r(kr)}" fill="#FFFFFF"/>')
+    if off is None:
+        out.append(B.anim("fade", on, 0.3, track_on + knob))
+    else:
+        out.append(B.anim("fade", on, 0.3, track_off))
+        out.append(B.anim("fade", on, 0.3, B.keys([[0, 0, 0, 1, 1], [off, 0, 0, 1, 1], [off + 0.3, 0, 0, 1, 0]],
+                                                   track_on)))
+        out.append(B.anim("fade", on, 0.3, B.keys([[0, 0, 0, 1, 1], [off, 0, 0, 1, 1],
+                                                    [off + 0.35, -(tw - th), 0, 1, 1]], knob)))
+    for word, show, hide in (("开", on, off), ("关", off, None)):
+        if show is None:
+            continue
+        s = (f'<text x="{_r(x0 + tw + 70 + (part.get("state_x", 0)))}" y="{_r(y0 + th + 90)}" '
+             f'font-family="{B.esc(ctx.font("mono"))}" font-size="56" font-weight="700" '
+             f'fill="{a if word == "开" else ink}">{word}</text>')
+        if not part.get("state", True):
+            break
+        g = B.anim("fade", show, 0.25, s)
+        out.append(B.out_at(hide, g, 0.2) if hide is not None else g)
+    return "".join(out), th + 150
 
 
 # ---- 对话：气泡逐条出现；可到点描绿框、加小注、变淡 ------------------------------------------------
@@ -73,7 +138,7 @@ def chat(ctx, part, x, top, w, room, pad, t0):
                          f'font-family="{B.esc(ctx.font("mono"))}" font-size="40" font-weight="700" fill="#FFFFFF">AI</text>')
         body = ""
         if s:
-            g = ctx.glyphs(B.plain_of(s), it["at"])
+            g = [max(v, at) for v in ctx.glyphs(B.plain_of(s), it["at"])]   # 字不早于自己的气泡出现
             body = B.text(ctx, s, bx + size * 0.7, y + bh / 2 + size * 0.36, size, g, font="sans", weight=600)
         else:
             for k in range(it.get("lines", 1)):
@@ -821,7 +886,7 @@ def menu(ctx, part, x, top, w, room, pad, t0):
 
 BODIES = {"terminal": terminal, "chat": chat, "dial": dial, "scan": scan, "gauges": gauges, "ring": ring,
           "bar": bar, "flow": flow, "context_stack": context_stack, "inspect": inspect, "todo": todo,
-          "level": level, "choice": choice, "field": field, "button": button, "menu": menu}
+          "level": level, "choice": choice, "field": field, "button": button, "menu": menu, "toggle": toggle}
 
 
 # ---- 一排并列卡片（各自到点升起、一直留着） -------------------------------------------------------

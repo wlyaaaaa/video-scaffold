@@ -66,6 +66,10 @@ class Ctx:
             idx = tl.text.find(core, frm)
             if idx < 0:
                 idx = tl.text.find(core, b.pos)
+            # 本页之后才念到的字（如别处才提到的名字）在本页只当概括字样，从 start/cue 起打出
+            ct = tl.char_time(idx) if idx >= 0 else None
+            if ct is not None and ct >= getattr(b, "end", float("inf")):
+                idx = -1
         if idx < 0:
             out, k = [], 0
             for ch in plain:
@@ -847,9 +851,13 @@ def tiles(ctx, el):
             fs = line.get("size", 100)
             ly += line.get("gap", fs * 1.5)
             gt = ctx.glyphs(plain_of(line["text"]), line["at"])
+            lid = _id("tline") if line.get("strike_at") else None
             parts.append(text(ctx, line["text"], pad, ly, fs, gt,
                               fill=line.get("color", "#FFFFFF" if dark else "muted"),
-                              font="sans", weight=600, settle=False))
+                              font="sans", weight=600, settle=False, tid=lid))
+            if lid:      # 这一行到点划掉（如“写死的数”）
+                parts.append(mark_rect(lid, 0, len(plain_of(line["text"])), ctx.at(line["strike_at"]),
+                                       line.get("strike_dur", 0.3), ctx.col("ink"), "strike"))
         if it.get("focus_at"):
             ft = ctx.at(it["focus_at"])
             parts.append(f'<rect data-anim="draw" data-delay="{_r(ft)}" data-dur="0.4" '

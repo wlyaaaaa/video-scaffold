@@ -60,11 +60,15 @@ def screenshot_stamp(ctx, el):
     track = [[at, 0, -130, 1.04, 0], [at + dur * .7, 0, 8, .996, 1], [at + dur, 0, 0, 1, 1]]
     out = [f'<g transform="translate({x},{y})">{B.keys(track, paper)}</g>']
     if el.get("focus"):
-        fx, fy, fw, fh = el["focus"]  # 原图的归一化区域
-        ta = ctx.at(el["focus_at"]) if el.get("focus_at") else at + dur
-        out.append(rect(x + fx*w, y + fy*h, fw*w, fh*h, "none", radius=16,
-                        stroke=ctx.col("accent"), sw=7,
-                        extra=f' data-anim="draw" data-delay="{ta:.4f}" data-dur="0.6"'))
+        # 原图的归一化区域；可写一个 [x,y,w,h]，或几个 [x,y,w,h,绑词?]（按各自绑词依次描出）
+        boxes = el["focus"] if isinstance(el["focus"][0], (list, tuple)) else [el["focus"]]
+        for box in boxes:
+            fx, fy, fw, fh = box[:4]
+            cue = box[4] if len(box) > 4 else el.get("focus_at")
+            ta = ctx.at(cue) if cue else at + dur
+            out.append(rect(x + fx*w, y + fy*h, fw*w, fh*h, "none", radius=16,
+                            stroke=ctx.col("accent"), sw=7,
+                            extra=f' data-anim="draw" data-delay="{ta:.4f}" data-dur="0.6"'))
     if el.get("caption"):
         out.append(label(ctx, el["caption"], el.get("caption_at", el["at"]), x, y + h + 96,
                          64, font="mono", weight=600, fill="muted"))
