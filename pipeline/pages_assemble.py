@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 
 from pipeline import render_queue
+from pipeline.artifact_identity import sha256_file
 
 FPS, PAUSE, FADE_FRAMES = 60, 0.45, 12
 
@@ -76,6 +77,7 @@ def plan(manifest):
         path = _resolve(manifest.parent, item["path"])
         if not path.is_file():
             raise FileNotFoundError(path)
+        source_bytes, source_sha256 = path.stat().st_size, sha256_file(path)
         info = probe(path)
         video, audio = _stream(info, "video"), _stream(info, "audio")
         if not video or not audio:
@@ -93,6 +95,7 @@ def plan(manifest):
         if frames < 1 or (len(source) > 1 and frames < FADE_FRAMES):
             raise ValueError("a part is too short for the selected transition")
         parts.append({"id": item["id"], "path": str(path), "source_duration": duration,
+                      "source_bytes": source_bytes, "source_sha256": source_sha256,
                       "video_duration": float(video.get("duration", duration)), "speech_end": end,
                       "frames": frames, "start_frame": total})
         total += frames
@@ -176,7 +179,10 @@ def assemble(manifest):
             args = command(result, staged[0])
             _run(args, timeout=7200)
             actual = probe(staged[0], count=True)
+            if any(sha256_file(part["path"]) != part["source_sha256"] for part in result["parts"]):
+                raise ValueError("a source clip changed during assembly")
             result.update(final_probe=actual, verification=verify(actual, result),
+                          output_bytes=staged[0].stat().st_size, output_sha256=sha256_file(staged[0]),
                           chapters_path=str(targets[1]), receipt_path=str(targets[2]), ffmpeg_command=args)
             lines = []
             for chapter in result["chapters"]:
