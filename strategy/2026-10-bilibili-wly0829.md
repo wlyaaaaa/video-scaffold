@@ -5,7 +5,8 @@
 **本期《电子雪貂饲养员》已通过。** 本人于北京时间 2026-10-11 12:43 明确：“这次视频我通过了”。
 
 - **影片目录：** [20261010-bilibili-wly0829-film](E:/Projects/VideoProductions/20261010-bilibili-wly0829-film/)。当前采用白底绿图文页；从 [pages/](E:/Projects/VideoProductions/20261010-bilibili-wly0829-film/pages/) 的 `s1.json`、`seg02.json`—`seg10.json` 接续。
-- **已通过各段：** [_samples/checkpoint/](E:/Projects/VideoProductions/20261010-bilibili-wly0829-film/_samples/checkpoint/)。整片及章节输出在 [_samples/final/](E:/Projects/VideoProductions/20261010-bilibili-wly0829-film/_samples/final/)，新结果用新文件名。
+- **已通过各段：** [_samples/checkpoint/](E:/Projects/VideoProductions/20261010-bilibili-wly0829-film/_samples/checkpoint/)。
+- **整片定稿：** [_samples/final/full-v2.mp4](E:/Projects/VideoProductions/20261010-bilibili-wly0829-film/_samples/final/full-v2.mp4)，封面 `art/cover/cover-final.png`；拼法和六章章节见影片目录 `pages/README.md`。重出整片用新文件名。
 - **本期文案和配音：** 继续使用影片目录 `narration/` 中已经定稿的原文、音频和词轴；本次工作流完善不改它们。
 
 下一期从根 AGENTS.md 的图文页开工命令进入。创作字段见 [AUTHORING.md](../docs/AUTHORING.md)，命令和恢复见 [WORKFLOW.md](../docs/WORKFLOW.md)。本期原话的权威出处仍为决定文档 2026-10 卷各“视频：”节；投稿、站外发帖和网站修改按实际授权办理。
