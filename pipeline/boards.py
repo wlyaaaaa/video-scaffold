@@ -85,6 +85,17 @@ class Ctx:
         times = [first] * lead + spoken + [spoken[-1]] * (len(plain) - lead - len(core))
         return [round(max(v, t0 if start is not None else 0.0), 4) for v in times]
 
+    # ---- 品牌标志 ----
+    def logo_href(self, logo):
+        """logo 写分镜表顶层 `brands` 里的名字（如 "claude"），或直接写图片路径（相对分镜表）。"""
+        from pipeline.pages import _resolve
+        brands = getattr(self.b, "brands", None) or {}
+        path = brands.get(logo, logo)
+        full = _resolve(self.b.base, path) if self.b.base is not None else __import__("pathlib").Path(path)
+        if not full.exists():
+            raise FileNotFoundError(f"logo {logo!r}: 找不到图片 {full}")
+        return self.L.FU(str(full))
+
     # ---- 字 ----
     def width(self, s, size):
         return self.L._text_w(s, size)
@@ -264,6 +275,21 @@ def claims(ctx, el):
 # ================================================================================================
 # 小图标：会动的线条图标（画在 cx, cy 处，边长约 size）
 # ================================================================================================
+def brand_mark(ctx, logo, cx, cy, r, *, ring="rule", sw=None, scale=1.45):
+    """代表某一方的圆点换成标志：白底圆里放 logo。logo 方图按圆裁切，白底图也能融进白圆。
+    返回静态 SVG，入场由调用方套（pop 等）；不填 logo 的地方照旧画圆点。"""
+    href = ctx.logo_href(logo)
+    sw = max(3.0, r * 0.07) if sw is None else sw
+    clip = _id("logo")
+    s = r * scale
+    return (f'<defs><clipPath id="{clip}"><circle cx="{_r(cx)}" cy="{_r(cy)}" r="{_r(r - sw / 2)}"/></clipPath></defs>'
+            f'<circle cx="{_r(cx)}" cy="{_r(cy)}" r="{_r(r)}" fill="#FFFFFF"/>'
+            f'<g clip-path="url(#{clip})"><image href="{href}" x="{_r(cx - s / 2)}" y="{_r(cy - s / 2)}" '
+            f'width="{_r(s)}" height="{_r(s)}" preserveAspectRatio="xMidYMid meet"/></g>'
+            f'<circle cx="{_r(cx)}" cy="{_r(cy)}" r="{_r(r)}" fill="none" stroke="{ctx.col(ring)}" '
+            f'stroke-width="{_r(sw)}"/>')
+
+
 def icon(ctx, name, cx, cy, size, t0):
     a, ink = ctx.col("accent"), ctx.col("ink")
     r = size / 2
@@ -416,7 +442,12 @@ def card(ctx, cd, x, y, w, h, t0):
         size = cd.get("title_size", 110)
         cy += size
         inner.append(text(ctx, cd["title"], x + pad, cy, size, tt))
-        if cd.get("icon"):
+        if cd.get("logo"):       # 卡片代表某一方：标题右侧放标志（和 icon 二选一）
+            ia = ctx.at(cd["icon_at"]) if cd.get("icon_at") else max(tt) + 0.1
+            isz = cd.get("icon_size", 150)
+            inner.append(anim("pop", ia, 0.4, brand_mark(ctx, cd["logo"], x + w - pad - isz * 0.6,
+                                                         cy - size * 0.38, isz * 0.55)))
+        elif cd.get("icon"):
             ia = ctx.at(cd["icon_at"]) if cd.get("icon_at") else max(tt) + 0.1
             isz = cd.get("icon_size", 150)
             inner.append(icon(ctx, cd["icon"], x + w - pad - isz * (1.6 if cd["icon"] == "math" else 0.6),
@@ -519,7 +550,13 @@ def body_part(ctx, part, x, top, w, room, pad, t0, cid):
         size = part.get("size", 64)
         rowh = size * 2.6
         for k, item in enumerate(part["items"]):
-            s, cue = (item, None) if isinstance(item, str) else item
+            logo = None
+            if isinstance(item, str):
+                s, cue = item, None
+            elif isinstance(item, dict):
+                s, cue, logo = item["text"], item.get("at"), item.get("logo")
+            else:
+                s, cue, logo = (list(item) + [None])[:3]
             ta = ctx.at(cue) if cue else t0 + k * part.get("step", 0.55)
             ox = x + pad + (k % 2) * part.get("jog", 60)
             oy = top + k * (rowh + 28)
@@ -527,8 +564,9 @@ def body_part(ctx, part, x, top, w, room, pad, t0, cid):
             rot = (-1.2, 0.9, -0.6, 1.1)[k % 4]
             bub = (f'<rect x="{_r(ox)}" y="{_r(oy)}" width="{_r(cw)}" height="{_r(rowh)}" rx="{_r(rowh / 2)}" '
                    f'fill="#FFFFFF" stroke="{rule}" stroke-width="3"/>'
-                   f'<circle cx="{_r(ox + rowh / 2)}" cy="{_r(oy + rowh / 2)}" r="{_r(rowh * 0.28)}" '
-                   f'fill="{a if k == 1 else ctx.col("block")}"/>'
+                   + (brand_mark(ctx, logo, ox + rowh / 2, oy + rowh / 2, rowh * 0.34, sw=3) if logo else
+                      f'<circle cx="{_r(ox + rowh / 2)}" cy="{_r(oy + rowh / 2)}" r="{_r(rowh * 0.28)}" '
+                      f'fill="{a if k == 1 else ctx.col("block")}"/>') +
                    f'<text x="{_r(ox + rowh * 0.95)}" y="{_r(oy + rowh / 2 + size * 0.36)}" font-family="'
                    f'{esc(ctx.font("sans"))}" font-size="{size}" font-weight="600" fill="{ink}">{esc(s)}</text>')
             out.append(f'<g transform="rotate({rot} {_r(ox + cw / 2)} {_r(oy + rowh / 2)})">'
@@ -592,11 +630,17 @@ def timeline(ctx, el):
             st = ctx.glyphs(n["sub"], n.get("sub_at"), start=None if n.get("sub_at") else max(lt) + 0.1)
             out.append(text(ctx, n["sub"], nx, ly - 84 if up else ly + 72, 48, st, font="mono", weight=700,
                             fill="muted", anchor=anchor, settle=False))
+        lr = n.get("logo_r", 52)
         halo = (f'<g transform="translate({_r(nx)},{y})"><g data-anim="pulse" data-delay="{_r(t + 0.3)}" data-dur="0.3" '
-                f'data-amp="0.18" data-spd="6" data-opmin="0.2"><circle r="44" fill="{a}" fill-opacity="0.16"/></g></g>')
+                f'data-amp="0.18" data-spd="6" data-opmin="0.2"><circle r="{_r(lr * 1.45 if n.get("logo") else 44)}" '
+                f'fill="{a}" fill-opacity="0.16"/></g></g>')
         out.append(out_at(later, halo, 0.3))
-        dot_ink = anim("pop", t, 0.4, f'<circle r="22" fill="{ink}"/>')
-        dot_green = anim("pop", t, 0.4, f'<circle r="22" fill="{a}"/>')
+        if n.get("logo"):    # 节点代表某一方：圆点换成标志，最新节点描绿圈
+            dot_ink = anim("pop", t, 0.4, brand_mark(ctx, n["logo"], 0, 0, lr, ring="rule", sw=5))
+            dot_green = anim("pop", t, 0.4, f'<circle r="{_r(lr)}" fill="none" stroke="{a}" stroke-width="7"/>')
+        else:
+            dot_ink = anim("pop", t, 0.4, f'<circle r="22" fill="{ink}"/>')
+            dot_green = anim("pop", t, 0.4, f'<circle r="22" fill="{a}"/>')
         out.append(f'<g transform="translate({_r(nx)},{y})">{dot_ink}</g>')
         green = f'<g transform="translate({_r(nx)},{y})">{dot_green}</g>'
         out.append(out_at(later, green, 0.3))
@@ -675,7 +719,13 @@ def tally(ctx, el):
         dur = r.get("dur", 1.0)
         color = ctx.col(r.get("color", "ink" if k == 0 else "accent"))
         lab_t = ctx.glyphs(r["label"], r.get("label_at") or r["at"])
-        lab = text(ctx, r["label"], x, ry + bh * 0.5 + 30, 84, lab_t, font="sans", weight=700)
+        lx = x
+        lab = ""
+        if r.get("logo"):    # 这一行代表某一方：名字前放标志，名字右移
+            lr = bh * 0.5
+            lab = anim("pop", lab_t[0], 0.4, brand_mark(ctx, r["logo"], x + lr, ry + bh * 0.5, lr))
+            lx = x + lr * 2 + 30
+        lab += text(ctx, r["label"], lx, ry + bh * 0.5 + 30, 84, lab_t, font="sans", weight=700)
         out.append(out_at(merge, lab, 0.3))
         bar = (f'<rect data-anim="grow-bar" data-delay="{_r(t)}" data-dur="{_r(dur)}" x="{x + lw}" y="{ry}" '
                f'width="{_r(bw)}" height="{bh}" rx="12" fill="{color}"/>')

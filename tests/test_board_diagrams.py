@@ -141,6 +141,51 @@ class DiagramTests(unittest.TestCase):
         self.assertEqual(len(ins), 2)
         self.assertAlmostEqual(max(ins), pages.cue_time(self.tl, "一整天", 0)[0], places=3)
 
+    def test_logo_replaces_side_dots_and_keeps_text_on_time(self):
+        """代表某一方的圆点可换成标志图；名字照旧逐字、不早于念到，动画能放完；没写 logo 不出图。"""
+        with tempfile.TemporaryDirectory() as d:
+            Image.new("RGBA", (64, 64), (200, 100, 60, 255)).save(Path(d) / "brand.png")
+            builder = pages.PageBuilder(self.tl, {"elements": []}, 0, 0, Path(d), end=self.tl.duration,
+                                        brands={"x": "brand.png"})
+            elements = [
+                {"timeline": [{"label": "最后一句", "at": "最后一句", "logo": "x"}, {"label": "一个小时", "at": "一个小时"}],
+                 "at": "最后一句"},
+                {"tally": [{"label": "流量", "at": "流量", "value": 3, "logo": "x"}, {"label": "内存", "at": "内存", "value": 5}]},
+                {"deck": [{"at": "毛病", "title": "看不出来", "title_at": "看不出来", "logo": "x",
+                           "body": [{"kind": "comments", "items": [["流量", "流量", "x"], {"text": "内存", "at": "内存"}]}]}]},
+                {"focus_network": {"nodes": [{"label": "真正要的", "at": "真正要的", "logo": "x"}],
+                                   "visits": [{"node": 0, "at": "真正要的"}]}, "at": "最后一句"},
+                {"cross_check": {"checker": {"label": "AI", "at": "最后一句", "logo": "x"},
+                                 "rows": [{"at": "最后一句", "status": "ok"}]}, "at": "最后一句"},
+                {"lanes": {"lanes": [{"label": "流量", "at": "流量"}, {"label": "内存", "at": "内存"}],
+                           "spawn": {"at": "内存", "node_text": "AI", "logo": "x"}}, "at": "流量"},
+                {"condense": {"rows": [{"at": "同一个要求", "user": True}], "collapse_at": "还是照旧",
+                              "worker": {"at": "最后一句", "label": "最后一句", "logo": "x"}}, "at": "同一个要求"},
+            ]
+            for el in elements:
+                builder.element(el)
+            frag = "".join(builder.out + builder.mout)
+        root = parse_fragment(frag)
+        images = [n for n in root.iter() if n.tag.endswith("image")]
+        self.assertEqual(len(images), 8)   # 时间线、条形、卡片、胶囊、网络、核对者、轨道、摘要工人各一
+        for el in root.iter():
+            txt = "".join(el.itertext())
+            if not el.get("data-glyph-times") or TEXT.find(txt) < 0:
+                continue
+            idx = TEXT.find(txt)
+            for k, at in enumerate(json.loads(el.get("data-glyph-times"))):
+                ct = self.tl.char_time(idx + k)
+                if ct is not None:
+                    self.assertGreaterEqual(at + 1e-6, ct, txt)
+        self.assertEqual([f for f in pages.unfinished(frag, self.tl.duration + 2) if not f[4]], [])
+        plain = self.build([{"timeline": [{"label": "最后一句", "at": "最后一句"}], "at": "最后一句"}])
+        self.assertNotIn("<image", plain)
+
+    def test_missing_logo_fails(self):
+        with self.assertRaises(FileNotFoundError):
+            self.build([{"timeline": [{"label": "最后一句", "at": "最后一句", "logo": "no-such.png"}],
+                         "at": "最后一句"}], base=Path(tempfile.gettempdir()))
+
     def test_rail_hides_labels_of_steps_not_reached(self):
         frag = self.build([{"rail": ["清手机", "换电脑", "真用过"], "current": 1, "at": "换电脑"}])
         shown = ["".join(el.itertext()) for el in parse_fragment(frag).iter() if el.get("data-glyph-times")]

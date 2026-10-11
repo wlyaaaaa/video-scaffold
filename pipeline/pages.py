@@ -183,9 +183,10 @@ CONTENT_BOTTOM = 1840   # 往下留给字幕和进度条
 
 
 class PageBuilder:
-    def __init__(self, tl, page, start, start_pos, base, progress=None, end=None):
+    def __init__(self, tl, page, start, start_pos, base, progress=None, end=None, brands=None):
         import v2lib as L
         self.L, self.tl, self.page, self.start, self.base = L, tl, page, start, base
+        self.brands = brands or {}     # 表顶层 brands：标志名 → 图片路径，元素里写 "logo": "<名字>"
         self.pos = start_pos
         self.end = tl.duration if end is None else end
         th = L.theme()
@@ -528,7 +529,7 @@ class Project:
         prog = self.spec.get("progress")
         for i, (page, (t0, t1, pos)) in enumerate(zip(self.spec["pages"], self.pages)):
             progress = page.get("progress", prog)
-            frag = PageBuilder(self.tl, page, t0, pos, self.base, progress, t1).build()
+            frag = PageBuilder(self.tl, page, t0, pos, self.base, progress, t1, self.spec.get("brands")).build()
             found = list(unfinished(frag, t1 - t0, config.TRANSITION_SECONDS))
             for k, e, x, txt, _ in [f for f in found if f[4]]:
                 warnings.warn(f"page {i + 1}（已审定，只提示）: {k} 到 {t0 + e:.2f}s 才放完、{t0 + x:.2f}s 就退场“{txt}”")
@@ -549,7 +550,7 @@ class Project:
     def plan(self):
         rows = []
         for i, (page, (t0, t1, pos)) in enumerate(zip(self.spec["pages"], self.pages)):
-            b = PageBuilder(self.tl, page, t0, pos, self.base, end=t1)
+            b = PageBuilder(self.tl, page, t0, pos, self.base, end=t1, brands=self.spec.get("brands"))
             b.build()
             rows.append({"page": i + 1, "start": round(t0, 2), "end": round(t1, 2),
                          "elements": [[next(k for k in el if k not in ("at", "size", "y")), el.get("at"),

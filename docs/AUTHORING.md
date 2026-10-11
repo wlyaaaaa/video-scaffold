@@ -111,6 +111,8 @@
 | `tally` | 数字条形：条从左长出、数字滚动、单位按念到出现；有 `total` 时后面的条移上去接成一整条，总数滚动（小标签在数字上方） | `tally: [{label, value, at, dur, unit, unit_at, number}]`、`total: {label, at, value, count_at, unit, unit_at}` |
 | `wipe` | 底色圆从一点扩大盖住整页（边上一圈细绿线），用在换段落前 | `wipe`（绑词）、`x`/`y`、`dur` |
 
+**用标志代表某一方（logo）。** 圆点代表某个公司或模型时（Claude、Claude Code、Opus 一方；OpenAI、Codex、GPT 一方……），可以换成标志图：分镜表顶层写 `"brands": {"claude": "../art/brand/claude.png", "openai": "../art/brand/openai.png"}`，元素里写 `"logo": "claude"`（也可直接写图片路径）。标志放进白底圆里，按圆裁切，透明底和纯白底的方图都行；找不到图直接报错。不写 `logo` 的地方画法和原来完全一样。支持的位置：`timeline` 节点（`logo`、`logo_r` 默认 52，最新节点描绿圈）、`tally` 行（名字前放标志）、卡片 `logo`（标题右侧，和 `icon` 二选一）、`comments` 胶囊（条目写 `[文字, 绑词, 标志]` 或 `{text, at, logo}`）、`focus_network` 节点、`cross_check` 的 `checker.logo`、`lanes` 的 `spawn.logo`、`condense` 的 `worker.logo`。圆里原来写名字的节点（如核对者、分出去的模型）有标志时名字改写在圆下方，保持看得清。标志只代表“哪一方”，不代表数据。
+
 **动画放完才退场（出片时检查，不过就报错）。** 每个有限的动画（入场、描线、滚动、移动、划线……）都要在它所在的组退场（`exit_at`）、整页被 `wipe` 盖住或换页之前放完，并停够 `config.PAGE_MOTION["hold"]`（0.25 秒）；呼吸、循环流动、照片推近、声波和进度条不算。念得快放不下，就缩短动画、提前到前一个词，或换动法，不许半路切走。本人已审定、不再改的旧元素可写 `"hold_check": "warn"`，只提示不拦。一段配音一张表整段出片，不分段拼接。
 
 这些版式用到的运行时原语：`type`（`data-glyph-times` 逐字、`data-glyph-from` 由浅变深）、`keys`（关键帧移动/缩放/透明度）、`mark`（按字的位置画底色条、删除线、下划线）、`iris`（圆半径，盖页或圆形揭示）、`wave`、`shake`，以及文字的 `data-follow`（单位跟在滚动数字后面）。一期的内容写在本期 `pages\*.json`，版式不够用时在 `boards.py` 加一种（会复用的才加）。

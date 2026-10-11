@@ -113,7 +113,9 @@ def focus_network(ctx, el):
         points.append((nx, ny))
         at = ctx.at(node.get("at", el["at"]))
         out.append(line(ctx, f'M{cx},{cy} L{nx},{ny}', at, .6, color="rule", sw=5))
-        out.append(B.anim("pop", at, .45, circle(nx, ny, nr, "#FFFFFF", stroke=rule, sw=5)))
+        node_svg = (B.brand_mark(ctx, node["logo"], nx, ny, nr, sw=5) if node.get("logo")
+                    else circle(nx, ny, nr, "#FFFFFF", stroke=rule, sw=5))
+        out.append(B.anim("pop", at, .45, node_svg))
         if node.get("label"):
             dx, dy = node.get("label_offset", [0, nr + 64])
             out.append(label(ctx, node["label"], node.get("at", el["at"]), nx+dx, ny+dy,
@@ -373,9 +375,10 @@ def condense(ctx, el):
             nx, ny = sx + sw_ + 260, sy + sh_ / 2
             d = f'M{sx + sw_ + 20:g},{ny:g} L{nx - 120:g},{ny:g}'
         out.append(line(ctx, d, ta, .35, color="rule", sw=8))
-        out.append(B.anim("pop", ta + .2, .4, circle(nx, ny, 105, ink)
-                          + f'<text x="{nx:g}" y="{ny + 26:g}" text-anchor="middle" font-family="{B.esc(ctx.font("mono"))}" '
-                            f'font-size="70" font-weight="700" fill="#FFFFFF">AI</text>'))
+        node = (B.brand_mark(ctx, wk["logo"], nx, ny, 105, ring="ink", sw=6) if wk.get("logo") else
+                circle(nx, ny, 105, ink) + f'<text x="{nx:g}" y="{ny + 26:g}" text-anchor="middle" '
+                f'font-family="{B.esc(ctx.font("mono"))}" font-size="70" font-weight="700" fill="#FFFFFF">AI</text>')
+        out.append(B.anim("pop", ta + .2, .4, node))
         out.append(travelling_dot(ctx, d, ta + .3, 1.1, r=16, loop=True))
         if wk.get("label"):
             ls = wk.get("label_size", 76)
@@ -410,11 +413,18 @@ def cross_check(ctx, el):
             out.append(label(ctx, cfg[key], cfg.get(key + "_at") or el["at"], hx, y - 50, 84))
     chk = cfg.get("checker", {})
     ca = ctx.at(chk["at"]) if chk.get("at") else t_head
-    hub = [pulse(ctx, cx, cy, 190, ca + .4), B.anim("pop", ca, .45, circle(cx, cy, 140, ink))]
-    if chk.get("label"):
-        hub.append(B.text(ctx, chk["label"], cx, cy + 26, 74,
-                          ctx.glyphs(chk["label"], chk.get("label_at") or chk.get("at") or el["at"]),
-                          fill="#FFFFFF", anchor="middle", settle=False))
+    if chk.get("logo"):    # 核对者是某一方的模型：圆里放标志，名字写在圆下方
+        hub = [pulse(ctx, cx, cy, 190, ca + .4), B.anim("pop", ca, .45, B.brand_mark(ctx, chk["logo"], cx, cy, 140, ring="ink", sw=7))]
+        if chk.get("label"):
+            hub.append(B.text(ctx, chk["label"], cx, cy + 140 + 100, chk.get("label_size", 84),
+                              ctx.glyphs(chk["label"], chk.get("label_at") or chk.get("at") or el["at"]),
+                              anchor="middle", settle=False))
+    else:
+        hub = [pulse(ctx, cx, cy, 190, ca + .4), B.anim("pop", ca, .45, circle(cx, cy, 140, ink))]
+        if chk.get("label"):
+            hub.append(B.text(ctx, chk["label"], cx, cy + 26, 74,
+                              ctx.glyphs(chk["label"], chk.get("label_at") or chk.get("at") or el["at"]),
+                              fill="#FFFFFF", anchor="middle", settle=False))
     for k, r in enumerate(rows):
         ry = y + k * (rh + gap)
         at = ctx.at(r["at"])
@@ -513,11 +523,19 @@ def lanes(ctx, el):
         bx = starts[f] + spawn.get("branch", 200)
         d = f'M{bx:g},{y + f * gap:g} C{bx + 200:g},{y + f * gap:g} {starts[t] - 220:g},{y + t * gap:g} {starts[t]:g},{y + t * gap:g}'
         out.append(line(ctx, d, ta, .5, sw=8))
-        node = circle(starts[t], y + t * gap, 92, a)
-        if spawn.get("node_text"):   # 节点里的短名（已念过的名字），随节点一起弹出
-            node += (f'<text x="{starts[t]:g}" y="{y + t * gap + 24:g}" text-anchor="middle" '
-                     f'font-family="{B.esc(ctx.font("mono"))}" font-size="64" font-weight="700" fill="#FFFFFF">'
-                     f'{B.esc(spawn["node_text"])}</text>')
+        nr = spawn.get("node_r", 110 if spawn.get("logo") else 92)
+        if spawn.get("logo"):        # 分出去的是某一方的模型：圆里放标志，短名写在圆下方、保持看得清
+            node = B.brand_mark(ctx, spawn["logo"], starts[t], y + t * gap, nr, ring="accent", sw=8)
+            if spawn.get("node_text"):
+                node += (f'<text x="{starts[t]:g}" y="{y + t * gap + nr + 96:g}" text-anchor="middle" '
+                         f'font-family="{B.esc(ctx.font("heavy"))}" font-size="{spawn.get("node_text_size", 84)}" '
+                         f'font-weight="900" fill="{ink}">{B.esc(spawn["node_text"])}</text>')
+        else:
+            node = circle(starts[t], y + t * gap, nr, a)
+            if spawn.get("node_text"):   # 节点里的短名（已念过的名字），随节点一起弹出
+                node += (f'<text x="{starts[t]:g}" y="{y + t * gap + 24:g}" text-anchor="middle" '
+                         f'font-family="{B.esc(ctx.font("mono"))}" font-size="64" font-weight="700" fill="#FFFFFF">'
+                         f'{B.esc(spawn["node_text"])}</text>')
         out.append(B.anim("pop", ta + .4, .4, node))
         out.append(pulse(ctx, starts[t], y + t * gap, 130, ta + .8))
         if spawn.get("label"):
