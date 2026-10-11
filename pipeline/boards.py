@@ -53,13 +53,14 @@ class Ctx:
         from pipeline.pages import cue_time
         return cue_time(self.b.tl, cue, self.b.pos)[1]
 
-    def glyphs(self, plain, cue=None, start=None):
-        """plain 每个字的本页出现时刻。原文里找得到：各字被念到的时刻；找不到：从 start/cue 起逐字打出。"""
+    def glyphs(self, plain, cue=None, start=None, search=True):
+        """plain 每个字的本页出现时刻。原文里找得到：各字被念到的时刻；找不到：从 start/cue 起逐字打出。
+        search=False：已讲过的字样重现，不在后文里找，直接从 start/cue 起打出。"""
         tl, b = self.b.tl, self.b
         t0 = start if start is not None else self.at(cue)
         idx = -1
         core = plain.strip("“”\"「」 ")
-        if core:
+        if core and search:
             frm = b.pos
             if cue:
                 frm = max(b.pos, self.cue_pos(cue) - len(core))
@@ -394,6 +395,25 @@ def icon(ctx, name, cx, cy, size, t0):
              f"A{_r(bw_ * 0.32)},{_r(bw_ * 0.32)} 0 0 1 {_r(cx + bw_ * 0.32)},{_r(cy - r * 0.45)} "
              f"L{_r(cx + bw_ * 0.32)},{_r(cy - bh_ * 0.2)}")
         return draw(d, t0 + 0.15, 0.35, color=a, w=sw * 1.3) + body
+    if name == "plus":     # 往后加：一条横线接一个加号，加号弹出
+        s = r * 0.62
+        rows = "".join(draw(f"M{_r(cx - s)},{_r(cy - s * 0.55 + k * s * 0.45)} L{_r(cx + s * 0.2)},"
+                            f"{_r(cy - s * 0.55 + k * s * 0.45)}", t0 + 0.08 * k, 0.3, color=ink, w=sw * 0.8)
+                       for k in range(2))
+        px_, py_ = cx + s * 0.55, cy + s * 0.55
+        plus = (f'<path d="M{_r(px_ - s * 0.42)},{_r(py_)} L{_r(px_ + s * 0.42)},{_r(py_)} M{_r(px_)},{_r(py_ - s * 0.42)} '
+                f'L{_r(px_)},{_r(py_ + s * 0.42)}" stroke="{a}" stroke-width="{_r(sw * 1.4)}" stroke-linecap="round"/>')
+        return ring + rows + anim("pop", t0 + 0.25, 0.35, plus)
+    if name == "books":    # 按月分卷：三本书脊依次立起，最新一本绿色
+        bw_, bh_ = r * 0.36, r * 1.15
+        out_ = [ring]
+        for k in range(3):
+            bx_ = cx - bw_ * 1.6 + k * bw_ * 1.1
+            fill = a if k == 2 else ink
+            out_.append(f'<rect data-anim="grow-bar" data-grow="y" data-delay="{_r(t0 + 0.1 * k)}" data-dur="0.35" '
+                        f'x="{_r(bx_)}" y="{_r(cy - bh_ / 2)}" width="{_r(bw_)}" height="{_r(bh_)}" rx="{_r(bw_ * 0.18)}" '
+                        f'fill="{fill}"/>')
+        return "".join(out_)
     raise ValueError(f"unknown icon {name!r}")
 
 
@@ -813,7 +833,10 @@ def tiles(ctx, el):
         baseline = pad + size if lines else h / 2 + size * 0.36
         if title:
             tid = _id("tile")
-            tt = ctx.glyphs(plain_of(title), it.get("title_at", it["at"]))
+            if it.get("replay") or el.get("replay"):    # 前面已讲过的字样重现：从 at 起直接打出，不等后文再念到
+                tt = ctx.glyphs(plain_of(title), start=ctx.at(it.get("title_at", it["at"])), search=False)
+            else:
+                tt = ctx.glyphs(plain_of(title), it.get("title_at", it["at"]))
             parts.append(text(ctx, title, pad, baseline, size, tt, fill=fg, tid=tid,
                               settle=not dark, fade=it.get("fade", GLYPH_FADE)))
             if it.get("strike_at"):
@@ -844,8 +867,14 @@ def tiles(ctx, el):
         inner = "".join(parts)
         if it.get("dim_at"):
             dt = ctx.at(it["dim_at"])
-            inner = keys([[0, 0, 0, 1, 1], [dt, 0, 0, 1, 1],
-                          [dt + it.get("dim_dur", 0.3), 0, 0, 1, it.get("opacity", 0.25)]], inner)
+            low = it.get("opacity", 0.25)
+            track = [[0, 0, 0, 1, 1], [dt, 0, 0, 1, 1], [dt + it.get("dim_dur", 0.3), 0, 0, 1, low]]
+            if it.get("undim_at"):       # 变淡后再点亮（例如先只看禁令，再回到要求和建议）
+                ut = ctx.at(it["undim_at"])
+                if ut < track[-1][0]:
+                    raise ValueError(f"tile undim_at {it['undim_at']!r} comes before its dimming finishes")
+                track += [[ut, 0, 0, 1, low], [ut + 0.3, 0, 0, 1, 1]]
+            inner = keys(track, inner)
         if it.get("move_at"):
             mt, dest = ctx.at(it["move_at"]), it["move_to"]
             inner = keys([[0, 0, 0, 1, 1], [mt, 0, 0, 1, 1],
