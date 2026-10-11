@@ -61,7 +61,11 @@
 
 适合讲清“几件事、几条、几种”的段落：画面是一张页（米白底、黑色粗字、重点词绿色、旧说法灰或删除线、细线时间轴、等宽小标签、白色圆角卡片、底部分段进度），可配写实照片或抠图角色，也可以没有角色。走分镜配音支路，零件在 `v2lib` 后半部，样式只取 `config.PAGE_THEMES` 一处。
 
-**规矩。** 每个元素绑一个念到的词（`cue`，同词再次出现用 `index`，同词里错开用 `offset`），到点一拍进来，进来就停住；不推拉、不漂浮、不叠化，整场只在念到新词时变化。片段里放一次 `L.step_fps(12)`，所有进场按 12fps 定格推进。页与页之间硬切（`TRANSITION_SECONDS = 0`），图文页不加暗角颗粒（`CINEMATIC = False`）。`lint` 在图文页里看到 float、drift、push 这类持续运动的原语会提示。
+**内容与动作。** 有旁白时，字不早于念到它的时间出现。每个新内容绑真实词轴，重复词用 `index`，错开用非负 `offset`。入场、停留、离场和转场由内容与所选参考决定；逐字、描线、图表增长、局部持续运动、推拉和叠化都可组合。`scene_base.html` 已有这些原语，`pipeline.components` 与 `v2lib` 已有组件，优先复用，不另起动画引擎。无声图形和已讲过的内容可以随镜头组织运动。
+
+**通用动作默认（AI 取法，可改）。** `config.PAGE_MOTION` 集中提供 0.55 秒文字入场、0.7 秒主视觉入场、0.65 秒描线、1 秒数字增长、0.12 秒错开、100 像素位移和 0.18 秒换页。默认连续采样，不强制定格。原文文字自动按每字词轴揭示，图片可轻微推近，抠图可轻微浮动；数字与横条一起增长，进度条在整段里连续前进。标题、正文、标签的建议字号分别约 220–300、96–144、64–84 个 4K 像素，按实际构图调整；小字号提示不阻止创作。`data-ease="out|in-out|linear"` 可选缓动。超过 3.5 秒的主内容静止会提示检查；进度条不能掩盖主内容停滞。这些是可覆盖的创作默认，不是用户禁令。
+
+**看参考的方法。** 参考作品看它的设计语言和作者公开的做法（提示卡、简介、置顶评论），例如 BV1s2aV6cE5i 作品 01 是“搜索信息 + JavaScript 动态图形，用 OpenAI 的设计元素”。怎么动、多快、什么节奏由做的人凭动态图形的感觉定，不逐帧照抄、不量参考的时长；参考只当底线，目标比它好。
 
 **主题。** `config.PAGE_THEMES` 定颜色（page/ink/accent/muted/faint/rule/block/pen）、字体（heavy/sans/mono/hand）、边距、卡片、气泡、进度条和烧录字幕样式；`config.PAGE_THEME` 选当前主题，现有 `white-green`（默认，白底绿）和 `paper-red`（米色纸页、红笔、胶带照片卡）。零件的颜色和字体参数写角色名，换主题或在本期 `L.use_theme(dict(L.theme("white-green"), accent="#..."))` 改几项，不改零件。背景用 `L.page_background(<本期>/assets/page.png)` 写一张主题底色的整画布图，把 `config.BG_VIDEO` 指向它（静图会铺满画布且不动；纸纹等图片也可以直接作背景）。
 
@@ -84,14 +88,31 @@
 **从分镜表到页面。** 分镜表就是一个 JSON 文件，`python -m pipeline.pages <表.json> plan|stills|render` 直接把它做成有声、带字幕的 1080p 片子（详见 `pipeline/pages.py` 文件头）。一张表管一段片子：
 
 - `narration`：按顺序用哪几段配音，`audio` 指 mp3，词轴默认取同名 `.timestamps.json`，原文默认取同名 `.original.txt`；只要其中几句时写 `take`（原文里连续的一段，按句子边界写）。
-- `theme`、`out`、`work`、`tail`（片尾停留秒数）、`progress`（底部分段进度，可每页覆盖）。
-- `pages`：每页写 `say`（这页念的原句，方便对照）和 `elements`。页面在它第一个绑词前 0.25 秒切进来，到下一页为止。
+- `theme`、`out`、`work`、`tail`（片尾停留秒数）、`progress`（底部分段进度，可每页覆盖）、`transition`（换页秒数，默认取动作配置）。
+- `pages`：每页写 `say`（这页念的原句，方便对照）和 `elements`。页面在它第一个绑词前 0.08 秒准备换页，内容从词轴时刻开始；`top`、`width`、`x` 可改版式。`step_fps` 默认 0，显式填写正数才使用定格采样。
 - 元素：`kicker` 等宽小标、`title` 大标题、`big` 大字句、`text` 正文、`note`（`label` 小标签 + 一行粗体）、`old` 旧说法（`strike` 绑划线的词）、`bullets` `[[文字, 绑词], …]`、`numbers`（`mark`/`mark_at` 点亮第几个）、`figures`、`bars`（横条对比）、`meter`（`steps` 每格绑词）、`quote`、`tag`、`photo`、`cutout`（`mouth` 嘴的相对位置）、`bubble`（`box_at`/`box_label` 框出并标字）、`gap` 空白。文字里 `*重点*` 用强调色、`~旧说法~` 用灰色。
-- 绑词 `at` 写原文里显示的字（如“846”，不用写读法“八百四十六”）；同页第二次出现写 `词#2`，错开写 `词+0.2`。不用写坐标：左栏文字自上而下排、整体竖向居中，右栏放照片卡、抠图和气泡；个别元素可写 `y`、`cx`/`cy` 等覆盖。
+- 绑词 `at` 写原文里显示的字（如“846”，不用写读法“八百四十六”）；同页第二次出现写 `词#2`，错开写 `词+0.2s`（偏移带 s，“GPT-6”这类原文不会被当成偏移）。缺失、未命中或负偏移直接报错，不退回页首。原文文字自动逐字显现；概括标题与图形用明确的 `at`，已讲过的内容可在后面重现。不用写坐标：左栏文字自上而下排，右栏放主视觉；个别元素可写 `y`、`x`、`cx`/`cy` 等覆盖。
+- `anim`、`dur`、`shift` 可覆盖入场；`exit_at`、`exit_dur` 安排离场。照片 `hold: false` 关闭轻推近，`zoom` 改推近比例；抠图 `ambient: false` 关闭轻浮动。`bars` 的 `dur` 控制条形和数字，`label_at` 单独绑定标签。原始文字、单位和未来数值要分别按词轴组织。
+- 复杂、一次性的主视觉写在本期静态 SVG，元素用 `fragment: "visual.svg"` 接入。片段可直接用现有原语和 `data-cue`、`data-cue-index`、非负 `data-cue-offset`，分镜表统一解析成本页秒数；找不到的词仍失败。图表、流程和准确文字用代码；写实素材用生图，全部在本期目录保存。
+
+**通用版式（动态图形，`pipeline/boards.py`）。** 下面几种元素各自是一整块会动的版式，绝对定位、带默认坐标，按词轴安排每个动作；一页可以叠几种，用 `exit_at` 让一组退场，用 `wipe` 换段落。所有字都逐字出现：原文里有的字用各自被念到的时刻，概括字样（卡片标题、标签）从绑定的词起快速打出。
+
+| 元素 | 画面与动作 | 主要字段 |
+|---|---|---|
+| `head` | 左上粗体小标题逐字打出，后跟绿色胶囊标签弹出，下一行灰色小字可分段出现 | `head`、`at`、`kicker`/`kicker_at`、`tag`/`tag_at`、`sub`（字符串或 `[[字, 绑词], …]`） |
+| `claims` | 说法堆叠：当前说法大字逐字出现，重点被绿色划过（底色条 + 逐字变绿）；下一句来时旧说法缩小上移成一摞；到 `strike` 时变灰并划线。`quote: true` 加引号，`*…*` 整句绿色 | `claims: [{text, at, mark, mark_at, strike, size, quote}]`、`y`、`size`、`stack_y` |
+| `deck` | 右侧卡片组：一张接一张替换（旧卡淡出上移，新卡升起；`enter` 可选 `rise`/`pop`/`drop`/`iris`）。卡内：等宽小标签、标题（右侧可配动态图标 `icon`）、内容块 | `deck: [{at, label, title, title_at, icon, icon_at, body, frame, pad, enter}]`、`x`/`y`/`w`/`h` |
+| 卡片内容 `body` | `photo`（照片缓慢推近，`bleed` 铺满卡片）、`wave`（说话声波，`at`–`until`）、`grid`（方块逐个出现，`flip` 到点变黑）、`comments`（短评论气泡逐条弹出） | 每块 `{kind, …}` |
+| `timeline` | 细轴画出、刻度依次弹出；节点按念到弹出，最新节点绿色呼吸；`trace` 让一个点沿轴走过去，刻度随之变绿 | `timeline: [{label, at, x, anchor, sub}]`、`y`、`trace: {from, to, at, until}` |
+| `checklist` | 清单逐条出现，每条配会动的图标（`bolt` 呼吸、`wander` 点沿弯路走、`burst` 冲击波、`math` 描线、`quote`）；绿色指示条跟着念到的那条走，旧条变淡 | `checklist: [{text, at, icon, pre, pre_at}]`、`focus` |
+| `tally` | 数字条形：条从左长出、数字滚动、单位按念到出现；有 `total` 时后面的条移上去接成一整条，总数滚动，可加扫光 | `tally: [{label, value, at, dur, unit, unit_at, number}]`、`total: {label, at, value, count_at, unit, unit_at, sweep_at}` |
+| `wipe` | 底色圆从一点扩大盖住整页（边上一圈细绿线），用在换段落前 | `wipe`（绑词）、`x`/`y`、`dur` |
+
+这些版式用到的运行时原语：`type`（`data-glyph-times` 逐字、`data-glyph-from` 由浅变深）、`keys`（关键帧移动/缩放/透明度）、`mark`（按字的位置画底色条、删除线、下划线）、`iris`（圆半径，盖页或圆形揭示）、`wave`、`shake`，以及文字的 `data-follow`（单位跟在滚动数字后面）。一期的内容写在本期 `pages\*.json`，版式不够用时在 `boards.py` 加一种（会复用的才加）。
 
 素材写现有路径；要生图的按[先生图做设计稿](#先生图做设计稿再由代码照着画)交出，落盘后填路径。同一个主体只出现一次：照片卡里放场景，角色另用抠图从卡前出来，不在卡里和卡前各放一只。先做一段几十秒的样片定稿，再按同一张表往下写。表里没有的版式，先在 `PageBuilder` 加一种元素（会复用的才加），一次性的画面直接写进本期片段。
 
-**背景的取舍（2026-10-10 判断）。** 项目通用的流体玻璃背景（`background/background_4k.mp4`，由 `fluid_glass.comp` 生成）整段持续流动，带薄荷色流光、网格、等高线、扫光和一块磨砂玻璃框：流动违背“进来就停住”，薄荷色块会冲淡“绿色只给重点词”，玻璃框也和铺满全页的版式冲突，所以图文页不用它，改用主题底色静图。它作为默认讲解风格的背景本身没有毛病，不为图文页去改。
+**背景。** 图文页默认用主题底色，保持白底绿的清晰层次；分镜表 `background` 可指定已有图片或视频。是否使用流体玻璃、纹理或环境运动按本期视觉方向判断，背景运动不限制前景动画。
 
 ## 按需找灵感
 
@@ -163,7 +184,7 @@ AI 或人工审阅结果后，只把片段保存为 `scene_html/fragment_NN.svg`
 | `holo-3d` / `flip` / `morph` | 3D 面板、卡片翻转、路径形变 | 见 `ADVANCED_FX.md` |
 | `flow-blob` / `burst` / `shockwave` | 流体、粒子和冲击波 | 见 `ADVANCED_FX.md` |
 
-`fade-up` / `fade-left` / `fade-right` / `drop` 可用 `data-shift` 改位移像素。片段里放一个 `<g data-step-fps="12"/>`（`v2lib.step_fps(12)`）时，整场动画按 12fps 定格推进，适合“元素按字进来就停住”的印刷页做法。
+`fade-up` / `fade-left` / `fade-right` / `drop` 可用 `data-shift` 改位移像素。`<g data-step-fps="12"/>`（`v2lib.step_fps(12)`）是可选的定格效果；不写或写 0 时连续采样。逐字文本可用 `data-glyph-times` 指定每个字的本页时刻，`data-glyph-fade` 改单字淡入时长；页生成器从既有词轴填入，文字颜色保持原分段设置。
 
 所有原语必须只依赖传入的时间 `t`。禁止用 `requestAnimationFrame`、计时器、真实时钟或
 运行时随机数推进渲染状态。

@@ -776,11 +776,20 @@ def _shadow(idp, blur=26, dy=14, opacity=0.28, dx=0, color=None):
 
 
 # ---- 文字 --------------------------------------------------------------------------
-def page_text(s, x, y, size, cue=None, delay=0.3, dur=0.33, anim="fade-up", fill=None,
-              font=None, weight=900, anchor="start", ls=0, shift=None, offset=None, index=None):
+def page_text(s, x, y, size, cue=None, delay=0.3, dur=None, anim="fade-up", fill=None,
+              font=None, weight=900, anchor="start", ls=0, shift=None, offset=None, index=None,
+              glyph_times=None):
     """页上的一行字（标题、正文、标签都用它）。默认粗体墨色；s 可分段上色。"""
     fill = _col(fill, "ink"); font = _font(font, "heavy")
+    dur = config.PAGE_MOTION["entrance"] if dur is None else dur
     sh = f' data-shift="{shift}"' if shift is not None else ""
+    if glyph_times is not None:
+        import json
+        import html
+        if len(glyph_times) != len(_plain(s)):
+            raise ValueError("glyph timing count does not match visible text")
+        sh += f' data-glyph-times="{html.escape(json.dumps(glyph_times), quote=True)}"'
+        anim = "type"
     return (f'<text data-anim="{anim}"{sh} {_t(cue,delay,dur,offset,index)} x="{x}" y="{y}" '
             f'font-family="{font}" font-size="{size}" font-weight="{weight}" fill="{fill}" '
             f'text-anchor="{anchor}" letter-spacing="{ls}">{_spans(s, fill)}</text>')
@@ -818,10 +827,10 @@ def old_text(s, x, y, size, cue=None, delay=0.3, strike_cue=None, strike_delay=N
              fill=None, font=None, weight=700, offset=None):
     """旧说法：灰字；给 strike_cue/strike_delay 时到点划上删除线，否则一出现就带删除线。"""
     fill = _col(fill, "muted"); w = _text_w(_plain(s), size)
-    line_t = (_t(strike_cue, strike_delay or 0.0, 1/6, strike_offset) if (strike_cue or strike_delay is not None)
+    line_t = (_t(strike_cue, strike_delay or 0.0, config.PAGE_MOTION["draw"], strike_offset) if (strike_cue or strike_delay is not None)
               else _t(cue, delay, 0.01, offset))
     return (page_text(s, x, y, size, cue=cue, delay=delay, fill=fill, font=font or "heavy", weight=weight,
-                      anim="fade", dur=1/12, offset=offset)
+                      anim="fade-up", dur=config.PAGE_MOTION["entrance"], offset=offset)
             + f'<line data-anim="draw" {line_t} x1="{x - size*0.1:.0f}" y1="{y - size*0.32:.0f}" '
               f'x2="{x + w + size*0.1:.0f}" y2="{y - size*0.36:.0f}" stroke="{fill}" '
               f'stroke-width="{max(4, size // 14)}" stroke-linecap="round"/>')
@@ -881,15 +890,15 @@ def nav_list(items, x=None, y=640, gap=130, size=60, active=None, cue=None, dela
     return "".join(out)
 
 
-def bullets(items, x=None, y=900, size=60, gap=None, dash=True, fill=None):
+def bullets(items, x=None, y=900, size=60, gap=None, dash=True, fill=None, dur=None):
     """短横线清单。items 每项 (文字或分段, timing)；timing 同 timings：(cue, offset) 或 delay。"""
     th = theme(); x = th["margin"] if x is None else x; gap = gap or int(size * 1.75)
-    out = []
+    out = []; dur = config.PAGE_MOTION["entrance"] if dur is None else dur
     for i, (s, tm) in enumerate(items):
         yy = y + i * gap
         body = (f'<text x="0" y="0" font-family="{th["sans"]}" font-size="{size}" fill="{th["muted"]}">–</text>'
                 if dash else "")
-        out.append(f'<g transform="translate({x},{yy})"><g data-anim="fade" {_tm(tm, 1/12)}>{body}'
+        out.append(f'<g transform="translate({x},{yy})"><g data-anim="fade-left" data-shift="80" {_tm(tm, dur)}>{body}'
                    f'<text x="{size*1.0 if dash else 0:.0f}" y="0" font-family="{th["sans"]}" font-size="{size}" '
                    f'font-weight="500" fill="{_col(fill, "ink")}">{_spans(s, _col(fill, "ink"))}</text></g></g>')
     return "".join(out)
@@ -979,7 +988,7 @@ def time_block(x, w, axis_y, h, style="ink", label=None, sub=None, cue=None, del
     return "".join(out)
 
 
-def progress(n, current, frac=1.0, x=None, w=None, y=None, h=4):
+def progress(n, current, frac=1.0, x=None, w=None, y=None, h=4, duration=None, start_frac=0):
     """底部分段进度条：n 段浅灰细线，第 current 段（从 0 数）黑色、前 frac 部分绿色。静态，整场不动。"""
     th = theme(); x = th["margin"] if x is None else x
     w = (config.WIDTH - 2 * th["margin"]) if w is None else w
@@ -991,7 +1000,11 @@ def progress(n, current, frac=1.0, x=None, w=None, y=None, h=4):
         color = th["ink"] if i == current else th["rule"]
         out.append(f'<rect x="{sx:.1f}" y="{y}" width="{seg:.1f}" height="{h}" fill="{color}"/>')
         if i == current and frac > 0:
-            out.append(f'<rect x="{sx:.1f}" y="{y}" width="{seg*min(1.0, frac):.1f}" height="{h}" fill="{th["accent"]}"/>')
+            start = seg*max(0,min(start_frac,frac))
+            if start:
+                out.append(f'<rect x="{sx:.1f}" y="{y}" width="{start:.1f}" height="{h}" fill="{th["accent"]}"/>')
+            motion = f'data-anim="wipe" data-ease="linear" data-delay="0" data-dur="{duration}" ' if duration else ""
+            out.append(f'<rect {motion}x="{sx+start:.1f}" y="{y}" width="{seg*min(1.0, frac)-start:.1f}" height="{h}" fill="{th["accent"]}"/>')
     out.append('</g>')
     return "".join(out)
 
@@ -1008,13 +1021,14 @@ def card(x, y, w, h, inner="", cue=None, delay=0.4, dur=0.25, anim="fade-up", sh
             f'{inner}</g></g>')
 
 
-def photo_card(name, cx, cy, w, h=None, rotate=None, cue=None, delay=0.4, dur=0.33, anim=None, shift=None,
-               spin=2.5, tape=None, align="xMidYMid", offset=None, index=None):
+def photo_card(name, cx, cy, w, h=None, rotate=None, cue=None, delay=0.4, dur=None, anim=None, shift=None,
+               spin=2.5, tape=None, align="xMidYMid", offset=None, index=None, hold=0, zoom=1.035):
     """写实照片卡：主题决定白边、圆角、细边、投影、倾斜和胶带；(cx, cy) 是卡片中心，w 是照片宽。
     h 给定时按 w×h 裁切（align 选保留哪边，如 "xMinYMid"）。默认动作：倾斜主题“落到纸上”(drop)，
     不倾斜主题短距上移淡入(fade-up)；进来就停住。"""
     th = theme(); c = th["card"]
     iw, ih = img_dims(name); h = w * ih / iw if h is None else h
+    dur = config.PAGE_MOTION["media"] if dur is None else dur
     pad, radius = c["pad"], c["radius"]
     rotate = c["tilt"] if rotate is None else rotate
     tape = c["tape"] if tape is None else tape
@@ -1035,24 +1049,31 @@ def photo_card(name, cx, cy, w, h=None, rotate=None, cue=None, delay=0.4, dur=0.
             f'<rect x="{-w/2:.1f}" y="{-h/2:.1f}" width="{w:.1f}" height="{h:.1f}" fill="none" stroke="#000" '
             f'stroke-opacity="0.08" stroke-width="2"/>')
     extra = f' data-spin="{spin}"' if anim == "drop" else ""
+    inner = (f'<g data-anim="push" data-ease="linear" {_t(cue,delay,hold,offset,index)} '
+             f'data-sc0="1" data-sc1="{zoom}" data-origin="center center">' if hold else "")
     return (f'<defs>{_shadow(idp, blur=sb, dy=sdy, opacity=sop)}{clip}</defs>'
             f'<g transform="translate({cx},{cy}) rotate({rotate})">'
             f'<g data-anim="{anim}" data-shift="{shift}"{extra} {_t(cue,delay,dur,offset,index)}>'
             f'<rect x="{-cw/2:.1f}" y="{-ch/2:.1f}" width="{cw:.1f}" height="{ch:.1f}" rx="{radius}" fill="{c["fill"]}" filter="url(#{idp})"/>'
-            f'<image href="{FU(name)}" xlink:href="{FU(name)}" x="{-w/2:.1f}" y="{-h/2:.1f}" width="{w:.1f}" height="{h:.1f}" '
+            f'<g clip-path="url(#{idp}c)">{inner}<image href="{FU(name)}" xlink:href="{FU(name)}" x="{-w/2:.1f}" y="{-h/2:.1f}" width="{w:.1f}" height="{h:.1f}" '
             f'preserveAspectRatio="{align} slice" clip-path="url(#{idp}c)"/>'
-            f'{line}{tape_svg}</g></g>')
+            f'{"</g>" if hold else ""}</g>{line}{tape_svg}</g></g>')
 
 
-def cutout(name, x, y, h, cue=None, delay=0.4, dur=0.33, shift=260, shadow=True, offset=None, index=None):
+def cutout(name, x, y, h, cue=None, delay=0.4, dur=None, shift=180, shadow=True, offset=None, index=None,
+           ambient=False):
     """抠好的主体（透明底 PNG）压在卡片前面：从下方冒出来后停住。(x, y) 是图片左上角。"""
     iw, ih = img_dims(name); w = h * iw / ih
+    dur = config.PAGE_MOTION["media"] if dur is None else dur
     idp = _uid("cut", name, x, y, h)
     filt = f' filter="url(#{idp})"' if shadow else ""
     defs = f'<defs>{_shadow(idp, blur=22, dy=16, opacity=0.22, dx=-10)}</defs>' if shadow else ""
+    hover = (f'<g data-anim="float" data-amplitude="10" data-rotation="0.15" '
+             f'{_t(cue,delay,dur,offset,index)}>' if ambient else "")
     return (f'{defs}<g transform="translate({x},{y})"><g data-anim="fade-up" data-shift="{shift}" '
-            f'{_t(cue,delay,dur,offset,index)}><image href="{FU(name)}" xlink:href="{FU(name)}" '
-            f'width="{w:.1f}" height="{h:.1f}" preserveAspectRatio="xMidYMid meet"{filt}/></g></g>')
+            f'{_t(cue,delay,dur,offset,index)}>{hover}<image href="{FU(name)}" xlink:href="{FU(name)}" '
+            f'width="{w:.1f}" height="{h:.1f}" preserveAspectRatio="xMidYMid meet"{filt}/>'
+            f'{"</g>" if ambient else ""}</g></g>')
 
 
 def image_point(name, x, y, h, fx, fy):
@@ -1134,13 +1155,18 @@ def pen_circle(cx, cy, rx, ry, cue=None, delay=0.4, dur=0.25, color=None, width=
             f'stroke="{color}" stroke-width="{width}" stroke-linecap="round" stroke-linejoin="round"/></g>')
 
 
-def hbar(label, value, frac, x, y, w=1600, h=56, cue=None, delay=0.4, dur=1/6, fill=None, size=44, offset=None):
+def hbar(label, value, frac, x, y, w=1600, h=56, cue=None, delay=0.4, dur=None, fill=None, size=44, offset=None,
+         numeric=None, decimals=0, suffix="", label_delay=None):
     """横条对比：上方等宽小标签，条从左长出后停住，数值跟在条尾。frac 是 0—1 的长度。"""
     th = theme(); fill = _col(fill, "ink"); bw = max(h, w * max(0.0, min(1.0, frac)))
+    dur = config.PAGE_MOTION["count"] if dur is None else dur
     at = _t(cue, delay, dur, offset)
-    return (f'<text data-anim="fade" {_t(cue,delay,1/12,offset)} x="{x}" y="{y - h*0.5:.0f}" font-family="{th["mono"]}" '
+    number = (f'data-anim="count" {at} data-to="{numeric}" data-decimals="{decimals}" data-suffix="{esc(suffix)}"'
+              if numeric is not None else f'data-anim="fade-up" {at}')
+    lab_at = _t(None,label_delay,config.PAGE_MOTION["entrance"]) if label_delay is not None else at
+    return (f'<text data-anim="fade-up" {lab_at} x="{x}" y="{y - h*0.5:.0f}" font-family="{th["mono"]}" '
             f'font-size="{size}" font-weight="700" letter-spacing="4" fill="{th["muted"]}">{esc(label)}</text>'
             f'<rect data-anim="wipe" data-dir="left" {at} x="{x}" y="{y}" width="{bw:.0f}" height="{h}" fill="{fill}"/>'
-            f'<text data-anim="fade" {_t(cue, delay + dur, 1/12, (offset or 0) + dur if cue else None)} '
+            f'<text {number} '
             f'x="{x + bw + size*0.6:.0f}" y="{y + h*0.5 + size*0.95:.0f}" font-family="{th["heavy"]}" '
             f'font-size="{size*2.4:.0f}" font-weight="900" fill="{fill}">{esc(value)}</text>')

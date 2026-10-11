@@ -70,7 +70,13 @@ chapters.json 使用实际场景编号；第一章从场景 1 开始，之后编
 
 subtitles 生成全片 SRT/WebVTT，不烧进画面，并绑定词轴来源。manifest 在 verify 成功后生成 delivery.json，记录成片、封面、章节的哈希和来源；存在字幕时，字幕必须验证通过才可加入清单。
 
-要给本人看或上传的烧字幕副本另做，不改 final_output.mp4 和 delivery.json：`subtitles.karaoke_ass(原文, 词轴, duration)` 按当前主题出 ASS（按标点分句，念到的词用主题的强调色），`subtitles.playable_copy(成片, 输出, ass=…, audio=…)` 给出 1080p H.264 High@4.2、yuv420p、BT.709、AAC、faststart 的 ffmpeg 命令。原文要和词轴逐字对得上（空格和标点不算），对不上直接报错，不猜。
+要给本人看或上传的烧字幕副本另做，不改 final_output.mp4 和 delivery.json：`subtitles.karaoke_ass(原文, 词轴, duration, reveal=True)` 按当前主题出 ASS，按标点分句、念到后逐步显字，当前词用强调色；`reveal=False` 保留传统整句字幕选项。`subtitles.playable_copy(成片, 输出, ass=…, audio=…)` 给出 1080p H.264 High@4.2、yuv420p、BT.709、AAC、faststart 的 ffmpeg 命令。原文要和词轴逐字对得上（空格和标点不算），对不上直接报错，不猜。
+
+## 图文页：分镜表到有声动画
+
+在底座运行 `python -m pipeline.pages <本期/pages/段落.json> plan|stills|render`。`plan` 核对实际起止与绑词；`stills` 用本机 Chrome 无头出关键帧；`render` 复用既有构建、布局检查和逐帧渲染，再接同一段配音与逐步显示字幕。全部素材、片段和中间产物在本期目录；下一段只换配音、素材和镜头，不复制底座代码。字段及参考研究方法见 AUTHORING.md“图文页”。
+
+创作先看选定参照的原生帧与作者提示要点，再用已有原语安排文字、主视觉、图表、持续运动和换页。动作时长、字号、分组、照片推近和抠图轻浮动集中在 `PAGE_MOTION` 或表中覆盖；没有“出现后必须静止”的限制。缺词、负偏移会阻止出片；长时间没有主内容动作只警告，返回构图和分镜调整。进度条在整段连续走，不把进度条变化当作主视觉动画。
 
 verify 检查完整来源链、视频与音频流、画布、编码、帧率、预期总帧数和总时长、可确定的流时长和起点、PNG 封面以及章节来源和范围。不能用两个同样短的音视频流或文件存在冒充完整交付。READY 只表示自动结构验收通过，不表示人工看过、语音绝对准确或已经投稿。
 

@@ -135,7 +135,7 @@
     const kind = el.getAttribute("data-anim");
     const delay = parseFloat(el.getAttribute("data-delay") || "0");
     const dur = parseFloat(el.getAttribute("data-dur") || "1");
-    const rec = { el, kind, delay, dur };
+    const rec = { el, kind, delay, dur, easing: el.getAttribute("data-ease") || "out" };
     // optional travel distance (px) for fade-up / fade-left / fade-right / drop
     const shift = parseFloat(el.getAttribute("data-shift"));
     rec.shift = Number.isFinite(shift) ? shift : null;
@@ -179,10 +179,16 @@
       }
       el.textContent = "";
       rec.glyphs = [];
+      rec.glyphTimes = el.hasAttribute("data-glyph-times")
+        ? JSON.parse(el.getAttribute("data-glyph-times")) : null;
+      rec.glyphFade = parseFloat(el.getAttribute("data-glyph-fade") || "0.12");
+      rec.glyphFrom = el.getAttribute("data-glyph-from");   // each glyph settles from this colour
+      rec.baseFill = el.getAttribute("fill") || "#000000";
       for (const [ch, fill] of parts) {
         const ts = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
         ts.textContent = ch;
         if (fill) ts.setAttribute("fill", fill);
+        ts._final = fill || null;
         ts.style.opacity = 0;
         el.appendChild(ts);
         rec.glyphs.push(ts);
@@ -250,6 +256,35 @@
       rec.life = parseFloat(el.getAttribute("data-life") || "1.2");
       rec.spin = parseFloat(el.getAttribute("data-spin") || "0");
     }
+    // ---- board primitives (图文页通用版式) -------------------------------------
+    if (kind === "keys") {              // keyframed move/scale/opacity: data-keys=[[t,x,y,s,o],...]
+      rec.keys = JSON.parse(el.getAttribute("data-keys") || "[[0,0,0,1,1]]");
+      el.style.transformBox = "view-box"; el.style.transformOrigin = "0px 0px";
+    }
+    if (kind === "wave") {              // audio-level bar: scaleY wobble inside [delay, delay+dur]
+      rec.amp = parseFloat(el.getAttribute("data-amp") || "1");
+      rec.spd = parseFloat(el.getAttribute("data-spd") || "11");
+      rec.phase = parseFloat(el.getAttribute("data-phase") || "0");
+      rec.base = parseFloat(el.getAttribute("data-base") || "0.18");
+      el.style.transformOrigin = "center center";
+    }
+    if (kind === "mark") {              // band / strike / underline sized from a text's own glyphs
+      rec.sel = el.getAttribute("data-text");
+      rec.c0 = parseInt(el.getAttribute("data-c0") || "0");
+      rec.c1 = parseInt(el.getAttribute("data-c1") || "1");
+      rec.mode = el.getAttribute("data-mode") || "band";
+      rec.pad = parseFloat(el.getAttribute("data-pad") || "0.08");
+    }
+    if (kind === "iris") {              // circle radius tween (cover wipe or clip reveal)
+      rec.r0 = parseFloat(el.getAttribute("data-r0") || "0");
+      rec.r1 = parseFloat(el.getAttribute("data-r1") || "2400");
+      el.setAttribute("r", rec.r0);
+    }
+    if (kind === "shake") {             // decaying jolt (impact), stays put afterwards
+      rec.amp = parseFloat(el.getAttribute("data-amp") || "24");
+      rec.freq = parseFloat(el.getAttribute("data-freq") || "48");
+      rec.decay = parseFloat(el.getAttribute("data-decay") || "7");
+    }
     if (kind === "shockwave") rec.maxs = parseFloat(el.getAttribute("data-max") || "8");
     if (kind === "flip") {               // Yu-Gi-Oh card flip-in reveal
       rec.ry0 = parseFloat(el.getAttribute("data-ry0") || "-100");
@@ -273,14 +308,32 @@
     // these manage their own opacity via apply(); only zero out the simple fades
     const SELF = ["draw","type","trace-dot","grow-bar","draw-area","wipe",
                   "highlight-sweep","move-along","play-head","tilt","push","fade-out","xfade","kicker-zoom",
-                  "holo-3d","morph","flow-blob","burst","shockwave","flip","pulse","drift"];
+                  "holo-3d","morph","flow-blob","burst","shockwave","flip","pulse","drift",
+                  "keys","wave","mark","iris","shake"];
     if (!SELF.includes(kind)) el.style.opacity = 0;
     nodes.push(rec);
   }
 
+  // these stay visible before their delay (exit envelopes, idle states, keyframed tracks)
+  const STAY = ["fade-out", "xfade", "keys", "wave", "shake"];
+  function mixHex(a, b, q) {
+    const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    const ch = s => [(s >> 16) & 255, (s >> 8) & 255, s & 255];
+    const A = ch(pa), B = ch(pb);
+    return "rgb(" + A.map((v, i) => Math.round(v + (B[i] - v) * q)).join(",") + ")";
+  }
+
   function apply(rec, t) {
     const { el, kind, delay, dur } = rec;
-    const p = easeOut(clamp01((t - delay) / dur));
+    // Every entrance is hidden before its cue, including SELF primitives.
+    // Exit envelopes deliberately keep their content visible until they start.
+    if (t < delay && !STAY.includes(kind)) {
+      el.style.opacity = 0;
+      return;
+    }
+    el.style.opacity = 1;
+    const raw = clamp01((t - delay) / dur);
+    const p = rec.easing === "linear" ? raw : rec.easing === "in-out" ? easeInOut(raw) : easeOut(raw);
 
     switch (kind) {
       case "fade":     el.style.opacity = p; break;
@@ -333,6 +386,15 @@
         break;
       }
       case "type": {
+        if (rec.glyphTimes) {
+          rec.glyphs.forEach((g, i) => {
+            const at = rec.glyphTimes[i] ?? delay;
+            g.style.opacity = clamp01((t - at) / Math.max(0.001, rec.glyphFade));
+            if (rec.glyphFrom) g.setAttribute("fill", mixHex(rec.glyphFrom, g._final || rec.baseFill,
+                                                            easeOut(clamp01((t - at) / 0.4))));
+          });
+          break;
+        }
         const shown = Math.floor(clamp01((t - delay) / dur) * rec.glyphs.length + 0.0001);
         rec.glyphs.forEach((g, i) => { g.style.opacity = i < shown ? 1 : 0; });
         break;
@@ -340,8 +402,9 @@
       case "float": {
         // weightless hover: enters once, then drifts forever
         const fade = clamp01((t - delay) / Math.max(dur, 0.001));
-        const y = Math.sin(t * 0.6) * 18;
-        const r = Math.sin(t * 0.45) * 0.4;
+        const local = Math.max(0, t - delay);
+        const y = Math.sin(local * 0.6) * parseFloat(el.getAttribute("data-amplitude") || "18");
+        const r = Math.sin(local * 0.45) * parseFloat(el.getAttribute("data-rotation") || "0.4");
         el.style.opacity = fade;
         el.style.transform = `translateY(${y}px) rotate(${r}deg)`;
         break;
@@ -380,8 +443,52 @@
       case "tilt":      { el.style.opacity = 1; el.style.transform = `rotate(${rec.to*p}deg)`; break; }
       case "split-push":{ const sgn = rec.side==="right"?1:-1; el.style.opacity = p; el.style.transform = `translateX(${sgn*(1-p)*rec.gap}px)`; break; }
       case "push": {
-        const q = easeInOut(clamp01((t-delay)/dur)); el.style.opacity = 1;
+        const q = rec.easing === "linear" ? raw : easeInOut(raw); el.style.opacity = 1;
         el.style.transform = `translate(${lerp(rec.tx0,rec.tx1,q)}px,${lerp(rec.ty0,rec.ty1,q)}px) scale(${lerp(rec.sc0,rec.sc1,q)})`;
+        break;
+      }
+
+      // ---- board primitives --------------------------------------------------
+      case "keys": {
+        const K = rec.keys; let v = K[0];
+        if (t >= K[K.length - 1][0]) v = K[K.length - 1];
+        else for (let i = 0; i < K.length - 1; i++) {
+          const a = K[i], b = K[i + 1];
+          if (t >= a[0] && t < b[0]) {
+            const q = b[0] > a[0] ? easeInOut((t - a[0]) / (b[0] - a[0])) : 1;
+            v = a.map((x, j) => lerp(x, b[j], q)); break;
+          }
+        }
+        el.style.opacity = v[4];
+        el.style.transform = `translate(${v[1].toFixed(2)}px,${v[2].toFixed(2)}px) scale(${v[3].toFixed(4)})`;
+        break;
+      }
+      case "wave": {
+        const env = clamp01((t - delay) / 0.15) * clamp01((delay + dur - t) / 0.2);
+        const w = Math.abs(Math.sin(t * rec.spd + rec.phase)) * (0.55 + 0.45 * Math.sin(t * rec.spd * 0.37 + rec.phase * 2.3));
+        el.style.transform = `scaleY(${(rec.base + (1 - rec.base) * rec.amp * env * Math.max(0, w)).toFixed(4)})`;
+        break;
+      }
+      case "mark": {
+        const tx = document.querySelector(rec.sel); if (!tx) break;
+        let x0, x1;
+        try { x0 = tx.getStartPositionOfChar(rec.c0).x; x1 = tx.getEndPositionOfChar(rec.c1 - 1).x; } catch (e) { break; }
+        const fs = parseFloat(tx.getAttribute("font-size")), base = parseFloat(tx.getAttribute("y") || "0");
+        const pad = rec.pad * fs;
+        let y, h;
+        if (rec.mode === "strike") { h = Math.max(4, fs * 0.075); y = base - fs * 0.34 - h / 2; }
+        else if (rec.mode === "under") { h = Math.max(4, fs * 0.09); y = base + fs * 0.14; }
+        else { h = fs * 0.46; y = base - fs * 0.30; }
+        el.setAttribute("x", (x0 - pad).toFixed(1)); el.setAttribute("y", y.toFixed(1));
+        el.setAttribute("height", h.toFixed(1));
+        el.setAttribute("width", Math.max(0, (x1 - x0 + 2 * pad) * p).toFixed(1));
+        break;
+      }
+      case "iris": { const q = el.hasAttribute("data-ease") ? p : easeInOut(raw);
+                     el.setAttribute("r", lerp(rec.r0, rec.r1, q).toFixed(1)); break; }
+      case "shake": {
+        const tt = Math.max(0, t - delay), a = t < delay ? 0 : rec.amp * Math.exp(-tt * rec.decay) * Math.sin(tt * rec.freq);
+        el.style.transform = `translate(${a.toFixed(2)}px,0px) rotate(${(a * 0.03).toFixed(3)}deg)`;
         break;
       }
 
@@ -467,7 +574,14 @@
   window.seekTime = function (t) {
     if (stepFps > 0 && Number.isFinite(stepFps)) t = Math.floor(t * stepFps + 1e-6) / stepFps;
     for (const rec of nodes) apply(rec, t);
+    // data-follow="#id": keep this text right after another (e.g. a unit after a counting number)
+    for (const el of follows) {
+      const tg = document.querySelector(el.getAttribute("data-follow"));
+      if (!tg) continue;
+      try { const bb = tg.getBBox(); el.setAttribute("x", (bb.x + bb.width + parseFloat(el.getAttribute("data-gap") || "24")).toFixed(1)); } catch (e) {}
+    }
   };
+  const follows = [...document.querySelectorAll("[data-follow]")];
 
   window.addEventListener('message', event => {
     if (event.source !== parent || event.data?.type !== 'video-scaffold.seek') return;

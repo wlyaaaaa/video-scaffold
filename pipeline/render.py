@@ -299,6 +299,10 @@ def _chunk_cmd(bg_offset, chunk_dur, chunk_out):
         "png",
         "-r",
         str(config.FPS),
+        # A fully covered frame (e.g. a full-page wipe) arrives as an opaque RGB
+        # PNG between RGBA ones; rebuilding the filter graph there drops frames.
+        "-reinit_filter",
+        "0",
         "-i",
         "-",
         "-filter_complex",

@@ -127,6 +127,17 @@ PAGE_THEMES = {
 }
 PAGE_THEME = os.environ.get("VIDEO_PAGE_THEME", "white-green")
 
+# 图文页动作规格：复用 scene_base 的现有原语，单位为秒/4K 像素。
+# 字号服务手机观看；动画在输出帧率上连续采样，定格风格须显式指定。
+PAGE_MOTION = {
+    "entrance": 0.55, "media": 0.7, "draw": 0.65, "count": 1.0,
+    "stagger": 0.12, "shift": 100, "glyph_fade": 0.12,
+    "transition": 0.18, "static_warning": 3.5,
+    "sizes": {"kicker": 84, "title": 280, "big": 240, "text": 128,
+              "old": 140, "note": 128},
+    "min_text": 96, "min_label": 64,
+}
+
 # --- scene transitions ------------------------------------------------------
 # How one scene leaves and the next enters (motion + cross-dissolve through bg).
 TRANSITION = "rise"  # fade | rise | slide-left | slide-right | zoom

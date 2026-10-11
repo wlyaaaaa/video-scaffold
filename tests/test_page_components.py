@@ -107,12 +107,11 @@ class PageComponentTests(unittest.TestCase):
         self.assertIn('data-dir="down"', resolved)  # 时间块从轴向上长出
         self.assertNotIn('data-anim="float"', resolved)
 
-    def test_type_keeps_coloured_spans_and_lint_flags_page_motion(self) -> None:
+    def test_type_keeps_coloured_spans_and_lint_accepts_page_motion(self) -> None:
         source = (ROOT / "templates" / "scene_base.html").read_text(encoding="utf-8")
         self.assertIn('ts.setAttribute("fill", fill)', source)
-        from pipeline import lint
-        self.assertIn("float", lint.PAGE_CONTINUOUS)
-        self.assertNotIn("fade-up", lint.PAGE_CONTINUOUS)
+        from pipeline.build_scene import parse_fragment
+        parse_fragment('<g data-step-fps="0"/><g data-anim="float"/><g data-anim="push"/>')
 
     def test_karaoke_ass_follows_theme_and_multichar_words(self) -> None:
         import config

@@ -164,7 +164,7 @@ def _phrases(text, words):
     return phrases
 
 
-def karaoke_ass(text, words, duration=None, theme=None, play_res=(1920, 1080)):
+def karaoke_ass(text, words, duration=None, theme=None, play_res=(1920, 1080), reveal=False):
     """ASS subtitles: one phrase (split at punctuation) at a time, the word being
     spoken in the theme's accent colour; styled only by the page theme.
 
@@ -195,6 +195,8 @@ def karaoke_ass(text, words, duration=None, theme=None, play_res=(1920, 1080)):
             body = ""
             for ch, s in ph:
                 ch = ch.replace("{", "(").replace("}", ")")
+                if reveal and s and words[s[0]]["start"] > x + 1e-6:
+                    continue
                 hot = bool(s) and words[s[0]]["start"] <= x < words[s[1]]["end"]
                 body += "{\\c" + on + "}" + ch + "{\\c" + off + "}" if hot else ch
             events.append(f"Dialogue: 0,{_ass_time(x)},{_ass_time(y)},Sub,,0,0,0,,{body}")
