@@ -1,181 +1,222 @@
-"""整机出片排队：同时出片的数量和可用内存都够了才放行。
+"""Shared FIFO for pages render/stills and the compatible command wrapper.
 
-多个会话、多个工作副本同时出片时，每段出片又会开好几路编码，一起跑会把内存撑满。
-把出片命令套进这个脚本即可：
-
-    python -m pipeline.render_queue -- python -m pipeline.pages <分镜表> render
-
-- 全机最多同时放行 VIDEO_RENDER_SLOTS 个（默认 2），按到达先后放行；
-- 已有出片在跑时，可用内存低于 VIDEO_RENDER_MIN_FREE_GB（默认 14）就先等；
-  没有别的出片在跑时直接放行，免得一直等不到；
-- 名额是系统临时目录里的锁文件，持有进程退出后自动作废；
-- 子命令的退出码原样返回。
+Use ``with lease(label): ...`` or ``python -m pipeline.render_queue -- command``.
+VIDEO_RENDER_SLOTS (2), VIDEO_RENDER_MIN_FREE_GB (14), VIDEO_RENDER_SLOT_DIR
+remain configurable. An otherwise idle queue admits one job even below the
+memory threshold. OS locks, rather than PID guesses, identify live owners.
 """
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import ctypes
+from datetime import datetime, timezone
+import json
+import math
 import os
+from pathlib import Path
 import subprocess
 import sys
-import tempfile
+import threading
 import time
 
 SLOTS = int(os.environ.get("VIDEO_RENDER_SLOTS", "2"))
 MIN_FREE_GB = float(os.environ.get("VIDEO_RENDER_MIN_FREE_GB", "14"))
-SLOT_DIR = os.environ.get(
-    "VIDEO_RENDER_SLOT_DIR",
-    os.path.join(tempfile.gettempdir(), "video-scaffold-render-slots"),
-)
+_default_dir = (Path("E:/Cache/video-scaffold-render-slots")
+                if os.name == "nt" and Path("E:/Cache").is_dir()
+                else Path.home() / ".cache/video-scaffold/render-slots")
+SLOT_DIR = os.environ.get("VIDEO_RENDER_SLOT_DIR", str(_default_dir))
 POLL_SECONDS = 5
 REPORT_SECONDS = 30
+_INHERITED = "VIDEO_RENDER_QUEUE_LEASE"
+_local = threading.local()
+if SLOTS < 1 or not math.isfinite(MIN_FREE_GB) or MIN_FREE_GB < 0:
+    raise ValueError("render slots must be positive and minimum free memory nonnegative")
 
 
 def free_gb():
+    """Available physical memory in GiB; unavailable measurements are conservative."""
     if os.name != "nt":
         try:
             with open("/proc/meminfo", encoding="ascii") as f:
                 for line in f:
                     if line.startswith("MemAvailable:"):
-                        return int(line.split()[1]) / 1024 / 1024
+                        return int(line.split()[1]) / 1024**2
         except OSError:
             pass
-        return float("inf")
+        return 0.0
 
     class MemoryStatus(ctypes.Structure):
-        _fields_ = [
-            ("dwLength", ctypes.c_ulong),
-            ("dwMemoryLoad", ctypes.c_ulong),
-            ("ullTotalPhys", ctypes.c_ulonglong),
-            ("ullAvailPhys", ctypes.c_ulonglong),
-            ("ullTotalPageFile", ctypes.c_ulonglong),
-            ("ullAvailPageFile", ctypes.c_ulonglong),
-            ("ullTotalVirtual", ctypes.c_ulonglong),
-            ("ullAvailVirtual", ctypes.c_ulonglong),
-            ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
-        ]
+        _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [
+            (name, ctypes.c_ulonglong) for name in
+            ("total", "available", "page_total", "page_available",
+             "virtual_total", "virtual_available", "extended")]
 
     status = MemoryStatus()
-    status.dwLength = ctypes.sizeof(MemoryStatus)
-    ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
-    return status.ullAvailPhys / 1024**3
+    status.length = ctypes.sizeof(status)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        return 0.0
+    return status.available / 1024**3
 
 
-def alive(pid):
-    if pid <= 0:
-        return False
-    if os.name != "nt":
-        try:
-            os.kill(pid, 0)
-            return True
-        except OSError:
-            return False
-    kernel32 = ctypes.windll.kernel32
-    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-    if not handle:
-        return False
-    code = ctypes.c_ulong()
-    ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
-    kernel32.CloseHandle(handle)
-    return bool(ok) and code.value == 259  # STILL_ACTIVE
+def auto_workers(available_gb=None):
+    """Reserve the admission margin, then budget 3 GiB per worker and queue slot.
+
+    This is a conservative starting estimate, not a hard memory limit. Keep the
+    existing four-worker ceiling unless the caller explicitly overrides it.
+    """
+    override = os.environ.get("VIDEO_RENDER_WORKERS")
+    if override is not None:
+        workers = int(override)
+        if workers < 1:
+            raise ValueError("VIDEO_RENDER_WORKERS must be positive")
+        _event("workers", workers=workers, selection="VIDEO_RENDER_WORKERS")
+        return workers
+    free = free_gb() if available_gb is None else available_gb
+    workers = (max(1, min(4, int(max(0, free - MIN_FREE_GB) / (3 * SLOTS))))
+               if math.isfinite(free) else 1)
+    _event("workers", workers=workers, selection="memory", slots=SLOTS,
+           free_gib=round(free, 3) if math.isfinite(free) else None,
+           reserve_gib=MIN_FREE_GB, per_worker_gib=3)
+    return workers
 
 
-def holder(path):
+def _try_lock(handle):
+    handle.seek(0)
     try:
-        with open(path, encoding="utf-8") as f:
-            return int(f.readline().strip() or 0)
-    except (OSError, ValueError):
-        return 0
-
-
-def busy_slots():
-    """清掉持有进程已退出的锁，返回仍在用的名额数。"""
-    used = 0
-    for i in range(SLOTS):
-        path = os.path.join(SLOT_DIR, f"slot-{i}.lock")
-        if not os.path.exists(path):
-            continue
-        if alive(holder(path)):
-            used += 1
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
         else:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-    return used
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        return False
 
 
-def try_take(label):
-    for i in range(SLOTS):
-        path = os.path.join(SLOT_DIR, f"slot-{i}.lock")
+def _unlock(handle):
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _guard():
+    root = Path(SLOT_DIR)
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / ".queue.lock").open("a+b") as handle:
+        if handle.seek(0, 2) == 0:
+            handle.write(b" ")
+            handle.flush()
+        while not _try_lock(handle):
+            time.sleep(0.02)
         try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            continue
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(f"{os.getpid()}\n{time.strftime('%Y-%m-%d %H:%M:%S')}\n{label}\n")
-        return path
-    return None
+            yield
+        finally:
+            _unlock(handle)
 
 
-def enqueue(label):
-    """按到达先后领号，名额空出来时只放行排在最前面的。"""
-    queue_dir = os.path.join(SLOT_DIR, "queue")
-    os.makedirs(queue_dir, exist_ok=True)
-    path = os.path.join(queue_dir, f"{time.time_ns():020d}-{os.getpid()}.ticket")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(f"{os.getpid()}\n{label}\n")
-    return path
+def _write(handle, record):
+    # The first byte stays locked; readers only access the JSON after it.
+    handle.seek(1)
+    handle.write(json.dumps(record, ensure_ascii=False).encode("utf-8"))
+    handle.truncate()
+    handle.flush()
 
 
-def ahead_of(ticket):
-    """排在自己前面、还在等的号数；进程已退出或已拿到名额的号顺手清掉。"""
-    queue_dir = os.path.dirname(ticket)
-    running = {holder(os.path.join(SLOT_DIR, f"slot-{i}.lock")) for i in range(SLOTS)}
-    count = 0
-    for name in sorted(os.listdir(queue_dir)):
-        path = os.path.join(queue_dir, name)
-        if path == ticket:
-            break
-        pid = holder(path)
-        if alive(pid) and pid not in running:
-            count += 1
-        else:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-    return count
+def _records():
+    """Called under the registry lock; reclaim records whose OS lock is free."""
+    records = []
+    for path in sorted((Path(SLOT_DIR) / "queue").glob("*.ticket")):
+        with path.open("r+b") as handle:
+            stale = _try_lock(handle)
+            if stale:
+                _unlock(handle)
+            else:
+                handle.seek(1)
+                records.append(json.loads(handle.read().decode("utf-8")))
+        if stale:
+            path.unlink()
+            _event("reclaimed", ticket=path.name)
+    return records
 
 
-def acquire(label):
-    os.makedirs(SLOT_DIR, exist_ok=True)
-    ticket = enqueue(label)
-    last_report = 0.0
+def _event(event, **fields):
+    print(json.dumps({"source": "render_queue", "event": event,
+                      "at": datetime.now(timezone.utc).isoformat(),
+                      "pid": os.getpid(), **fields}, ensure_ascii=False), flush=True)
+
+
+@contextmanager
+def lease(label="render"):
+    """Own one queue place; nested calls and the wrapper's child borrow it."""
+    existing = getattr(_local, "record", None)
+    if existing is not None and getattr(_local, "pid", None) == os.getpid():
+        yield existing
+        return
+    handle = None
+    path = None
+    started = time.monotonic()
     try:
-        while True:
-            used = busy_slots()
-            free = free_gb()
-            ahead = ahead_of(ticket)
-            if ahead == 0 and used < SLOTS and (used == 0 or free >= MIN_FREE_GB):
-                path = try_take(label)
-                if path:
-                    print(f"[出片排队] 放行：可用内存 {free:.1f} GB，同时出片 {used + 1}/{SLOTS}", flush=True)
-                    return path
-            now = time.monotonic()
-            if now - last_report >= REPORT_SECONDS:
-                print(
-                    f"[出片排队] 等待：前面还有 {ahead} 个在等，正在出片 {used}/{SLOTS}，"
-                    f"可用内存 {free:.1f} GB（有别的出片在跑时需 ≥ {MIN_FREE_GB:g} GB）",
-                    flush=True,
-                )
-                last_report = now
-            time.sleep(POLL_SECONDS)
+        with _guard():
+            queue_dir = Path(SLOT_DIR) / "queue"
+            queue_dir.mkdir(exist_ok=True)
+            records = _records()
+            inherited = os.environ.get(_INHERITED)
+            record = next((r for r in records if r["state"] == "active"
+                           and str((queue_dir / r["ticket"]).resolve()) == inherited), None)
+            if record is None:
+                # Increment beyond every live ticket even if wall time goes backwards.
+                number = max([time.time_ns()] + [int(r["ticket"].split("-")[0]) + 1 for r in records])
+                path = queue_dir / f"{number:020d}-{os.getpid()}.ticket"
+                handle = path.open("x+b")
+                handle.write(b" ")
+                handle.flush()
+                if not _try_lock(handle):
+                    raise RuntimeError("cannot lock own queue ticket")
+                record = {"ticket": path.name, "pid": os.getpid(), "label": str(label),
+                          "state": "waiting", "queued_at": datetime.now(timezone.utc).isoformat()}
+                _write(handle, record)
+                _event("queued", **record, slots=SLOTS, queue_dir=str(queue_dir.resolve()))
+        if handle is not None:
+            last_report = float("-inf")
+            while True:
+                with _guard():
+                    records = _records()
+                    active = sum(r["state"] == "active" for r in records)
+                    ahead = sum(r["state"] == "waiting" and r["ticket"] < record["ticket"] for r in records)
+                    free = free_gb()
+                    fields = {"ticket": record["ticket"], "label": str(label), "ahead": ahead,
+                              "active": active, "slots": SLOTS, "free_gib": round(free, 3),
+                              "min_free_gib": MIN_FREE_GB, "wait_seconds": round(time.monotonic() - started, 3)}
+                    if ahead == 0 and active < SLOTS and (active == 0 or free >= MIN_FREE_GB):
+                        record.update(state="active", admitted_at=datetime.now(timezone.utc).isoformat())
+                        _write(handle, record)
+                        _event("admitted", **{**fields, "active": active + 1})
+                        break
+                    if time.monotonic() - last_report >= REPORT_SECONDS:
+                        _event("waiting", **fields)
+                        last_report = time.monotonic()
+                time.sleep(POLL_SECONDS)
+        else:
+            _event("borrowed", ticket=record["ticket"], owner_pid=record["pid"])
+        _local.record, _local.pid, _local.handle = record, os.getpid(), handle
+        yield record
     finally:
-        try:
-            os.remove(ticket)
-        except OSError:
-            pass
+        _local.record = _local.handle = None
+        if handle is not None:
+            with _guard():
+                handle.close()  # OS releases the lifetime lock before removing the record.
+                path.unlink(missing_ok=True)
+                _event("released", ticket=path.name, elapsed_seconds=round(time.monotonic() - started, 3))
+
+
+acquire = lease
 
 
 def main(argv):
@@ -184,14 +225,28 @@ def main(argv):
     if not argv:
         print(__doc__)
         return 2
-    path = acquire(" ".join(argv)[:300])
-    try:
-        return subprocess.call(argv)
-    finally:
+    from pipeline.io_utils import _WindowsJob
+
+    with lease(" ".join(argv)[:300]) as record:
+        env = {**os.environ, _INHERITED: str((Path(SLOT_DIR) / "queue" / record["ticket"]).resolve())}
+        kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        if os.name != "nt" and _local.handle is not None:
+            kwargs["pass_fds"] = (_local.handle.fileno(),)
+        child = job = None
         try:
-            os.remove(path)
-        except OSError:
-            pass
+            child = subprocess.Popen(argv, env=env, **kwargs)
+            job = _WindowsJob(child)
+            return child.wait()
+        finally:
+            if child is not None and child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait()
+            if job is not None:
+                job.close()
 
 
 if __name__ == "__main__":
