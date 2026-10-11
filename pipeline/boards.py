@@ -691,3 +691,6 @@ def wipe(ctx, el):
 
 KINDS = {"head": head, "claims": claims, "deck": deck, "timeline": timeline, "checklist": checklist,
          "tally": tally, "wipe": wipe}
+
+from pipeline.board_diagrams import KINDS as DIAGRAM_KINDS
+KINDS.update(DIAGRAM_KINDS)

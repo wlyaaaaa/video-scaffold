@@ -401,9 +401,11 @@ class PageBuilder:
         parts = [self.L.step_fps(self.page.get("step_fps", 0)),
                  f'<g transform="translate(0,{dy:.0f})">', *self.out, "</g>", *self.mout]
         if self.progress:
-            n,current,frac = self.progress
-            parts.append(self.L.progress(n,current,frac*self.end/self.tl.duration,
-                                         duration=self.end-self.start,start_frac=frac*self.start/self.tl.duration))
+            n,current,frac = self.progress[:3]
+            begin = self.progress[3] if len(self.progress) > 3 else 0.0
+            parts.append(self.L.progress(n,current,begin+(frac-begin)*self.end/self.tl.duration,
+                                         duration=self.end-self.start,
+                                         start_frac=begin+(frac-begin)*self.start/self.tl.duration))
         return "".join(parts)
 
 
