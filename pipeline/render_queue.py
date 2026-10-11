@@ -5,7 +5,7 @@
 
     python -m pipeline.render_queue -- python -m pipeline.pages <分镜表> render
 
-- 全机最多同时放行 VIDEO_RENDER_SLOTS 个（默认 2）；
+- 全机最多同时放行 VIDEO_RENDER_SLOTS 个（默认 2），按到达先后放行；
 - 已有出片在跑时，可用内存低于 VIDEO_RENDER_MIN_FREE_GB（默认 14）就先等；
   没有别的出片在跑时直接放行，免得一直等不到；
 - 名额是系统临时目录里的锁文件，持有进程退出后自动作废；
@@ -118,26 +118,64 @@ def try_take(label):
     return None
 
 
+def enqueue(label):
+    """按到达先后领号，名额空出来时只放行排在最前面的。"""
+    queue_dir = os.path.join(SLOT_DIR, "queue")
+    os.makedirs(queue_dir, exist_ok=True)
+    path = os.path.join(queue_dir, f"{time.time_ns():020d}-{os.getpid()}.ticket")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"{os.getpid()}\n{label}\n")
+    return path
+
+
+def ahead_of(ticket):
+    """排在自己前面、还在等的号数；进程已退出或已拿到名额的号顺手清掉。"""
+    queue_dir = os.path.dirname(ticket)
+    running = {holder(os.path.join(SLOT_DIR, f"slot-{i}.lock")) for i in range(SLOTS)}
+    count = 0
+    for name in sorted(os.listdir(queue_dir)):
+        path = os.path.join(queue_dir, name)
+        if path == ticket:
+            break
+        pid = holder(path)
+        if alive(pid) and pid not in running:
+            count += 1
+        else:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    return count
+
+
 def acquire(label):
     os.makedirs(SLOT_DIR, exist_ok=True)
+    ticket = enqueue(label)
     last_report = 0.0
-    while True:
-        used = busy_slots()
-        free = free_gb()
-        if used < SLOTS and (used == 0 or free >= MIN_FREE_GB):
-            path = try_take(label)
-            if path:
-                print(f"[出片排队] 放行：可用内存 {free:.1f} GB，同时出片 {used + 1}/{SLOTS}", flush=True)
-                return path
-        now = time.monotonic()
-        if now - last_report >= REPORT_SECONDS:
-            print(
-                f"[出片排队] 等待：正在出片 {used}/{SLOTS}，可用内存 {free:.1f} GB"
-                f"（有别的出片在跑时需 ≥ {MIN_FREE_GB:g} GB）",
-                flush=True,
-            )
-            last_report = now
-        time.sleep(POLL_SECONDS)
+    try:
+        while True:
+            used = busy_slots()
+            free = free_gb()
+            ahead = ahead_of(ticket)
+            if ahead == 0 and used < SLOTS and (used == 0 or free >= MIN_FREE_GB):
+                path = try_take(label)
+                if path:
+                    print(f"[出片排队] 放行：可用内存 {free:.1f} GB，同时出片 {used + 1}/{SLOTS}", flush=True)
+                    return path
+            now = time.monotonic()
+            if now - last_report >= REPORT_SECONDS:
+                print(
+                    f"[出片排队] 等待：前面还有 {ahead} 个在等，正在出片 {used}/{SLOTS}，"
+                    f"可用内存 {free:.1f} GB（有别的出片在跑时需 ≥ {MIN_FREE_GB:g} GB）",
+                    flush=True,
+                )
+                last_report = now
+            time.sleep(POLL_SECONDS)
+    finally:
+        try:
+            os.remove(ticket)
+        except OSError:
+            pass
 
 
 def main(argv):
