@@ -1,13 +1,14 @@
 # 哔哩哔哩引流视频：战略稿与材料包
 
-## 本期现行入口（2026-10-10）
+## 本期现行入口（2026-10-11）
 
-- **定稿文案：** [30 号协作定稿](E:/Projects/VideoProductions/20261004-bilibili-wly0829-materials/reports/30-copy-final-cowrite-20261010.md)。本期标题和口播以这一份为准，不从下方旧第六版重新起稿。
-- **画面方案：** [31 号画面头脑风暴](E:/Projects/VideoProductions/20261004-bilibili-wly0829-materials/reports/31-visual-brainstorm-20261010.md)。这是对应 30 号文案的现行方案；其中风格、技术分工和推荐仍需按本人最终选择更新，不能把 AI 推荐当成已定。
-- **技术路线：** [32 号技术路线头脑风暴](E:/Projects/VideoProductions/20261004-bilibili-wly0829-materials/reports/32-tech-route-brainstorm-20261010.md)。这是现行讨论材料，技术路线以本人最终选择为准。
-- **当前开场：** [开场 A 工作目录](E:/Projects/VideoProductions/20261010-bilibili-wly0829-opening-a/)，已有设计稿在 [art/](E:/Projects/VideoProductions/20261010-bilibili-wly0829-opening-a/art/)，可渲染代码在 `work/`。文件存在不表示有声成片或人工验收已完成。
+**本期《电子雪貂饲养员》已通过。** 本人于北京时间 2026-10-11 12:43 明确：“这次视频我通过了”。
 
-接手时先读上述现行材料；创作方法见 [AUTHORING.md](../docs/AUTHORING.md)，已有手段与源码见 [ADVANCED_FX.md](../docs/ADVANCED_FX.md)。本人原话只存决定文档 `E:\.agents\docs\owner-decisions\2026-10.md`，按时间查本期以“视频：”开头的各节，不在这里复制。投稿、站外发帖和改网站仍按实际授权办理。
+- **影片目录：** [20261010-bilibili-wly0829-film](E:/Projects/VideoProductions/20261010-bilibili-wly0829-film/)。当前采用白底绿图文页；从 [pages/](E:/Projects/VideoProductions/20261010-bilibili-wly0829-film/pages/) 的 `s1.json`、`seg02.json`—`seg10.json` 接续。
+- **已通过各段：** [_samples/checkpoint/](E:/Projects/VideoProductions/20261010-bilibili-wly0829-film/_samples/checkpoint/)。整片及章节输出在 [_samples/final/](E:/Projects/VideoProductions/20261010-bilibili-wly0829-film/_samples/final/)，新结果用新文件名。
+- **本期文案和配音：** 继续使用影片目录 `narration/` 中已经定稿的原文、音频和词轴；本次工作流完善不改它们。
+
+下一期从根 AGENTS.md 的图文页开工命令进入。创作字段见 [AUTHORING.md](../docs/AUTHORING.md)，命令和恢复见 [WORKFLOW.md](../docs/WORKFLOW.md)。本期原话的权威出处仍为决定文档 2026-10 卷各“视频：”节；投稿、站外发帖和网站修改按实际授权办理。
 
 **下方“〇”至“八”均为历史草稿与背景材料。** 旧状态、旧数字、未完成项和 AI 取法只代表当时记录；与现行材料冲突时按顶部入口及更新的本人原话处理。10 月 10 日 08:20 那页汇报（VB1–VB5）已作废。
 

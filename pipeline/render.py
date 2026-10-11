@@ -80,7 +80,7 @@ def _render_identity_record(scene_html_paths, durations, chunk_frames, total_fra
         "file_resources": _scene_file_resources(scene_html_paths),
         "background_sha256": sha256_file(config.BG_VIDEO),
         "canvas": {"width": config.WIDTH, "height": config.HEIGHT, "fps": config.FPS,
-                   "capture": capture_size()},
+                   "capture": list(capture_size())},
         "frames": {
             "total": total_frames,
             "chunk": chunk_frames,

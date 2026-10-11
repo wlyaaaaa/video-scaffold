@@ -1,0 +1,19 @@
+{
+ "schema": "video-scaffold.pages.v1",
+ "theme": "white-green",
+ "render_height": 1080,
+ "narration": [{"audio": "../narration/intro.wav"}],
+ "out": "../_samples/checkpoint/intro.mp4",
+ "work": "../_samples/work/intro",
+ "tail": 0.6,
+ "transition": 0,
+ "pages": [{
+  "from": "第01页",
+  "elements": [
+   {"head": "从这里开工", "at": "开始", "sub": [["流程试片 · 合成测试音", "开始"]], "summary": true},
+   {"claims": [{"text": "先做小样", "at": "继续", "size": 220}, {"text": "再分段铺开", "at": "完成", "size": 200}], "y": 1300, "summary": true},
+   {"deck": [{"at": "开始", "title": "图文页", "title_at": "开始", "body": [{"kind": "grid", "n": 9, "cols": 3, "at": "继续", "flip": [0, 4, 8], "flip_at": "收尾"}]}], "x": 2200, "y": 600, "w": 1300, "h": 1000, "summary": true}
+  ]
+ }]
+}
+

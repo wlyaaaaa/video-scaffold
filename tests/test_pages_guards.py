@@ -15,6 +15,14 @@ def timeline(text, duration=8):
     return pages.Timeline([], text, words, align_text(text, words), duration)
 
 
+def changed_times(fragment, plain, times):
+    from pipeline.build_scene import parse_fragment
+    root = parse_fragment(fragment)
+    node = next(n for n in root.iter() if n.get('data-glyph-times') and ''.join(n.itertext()) == plain)
+    node.set('data-glyph-times', json.dumps(times)); node.set('data-delay', str(min(times)))
+    return pages.ET.tostring(root, encoding='unicode')
+
+
 class PageGuardsTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -81,7 +89,7 @@ class PageGuardsTests(unittest.TestCase):
         frag = b.build()
         self.assertEqual([], list(pages.early_glyphs(frag, b)))
         # 修改最终 SVG 仍关联同一次原文，时间不是关联键或期望值。
-        wrong = frag.replace('data-delay="1"', 'data-delay="0"').replace('[1.0]', '[0.0]')
+        wrong = changed_times(frag, '甲', [0.0])
         self.assertEqual([('甲', 0.0, 1)], list(pages.early_glyphs(wrong, b)))
 
     def test_summary_punctuation_replay_and_parent_visibility(self):
@@ -104,7 +112,9 @@ class PageGuardsTests(unittest.TestCase):
     def test_joined_cues_keep_occurrence_and_keys_hidden_intervals(self):
         b = pages.PageBuilder(timeline('甲乙乙'), {'elements': [
             {'head': '甲', 'at': '甲', 'sub': [['乙', '乙#2']]}]}, 0, 0, None)
-        self.assertEqual([('乙', 1.0, 2)], list(pages.early_glyphs(b.build(), b)))
+        frag = b.build()
+        self.assertEqual([], list(pages.early_glyphs(frag, b)))
+        self.assertEqual([('乙', 1.0, 2)], list(pages.early_glyphs(changed_times(frag, '乙', [1.0]), b)))
         b = pages.PageBuilder(timeline('甲乙', 12), {'elements': []}, 0, 0, None)
         b.tl.words[1]['start'] = 8
         svg = '<text data-anim="type" data-delay="6" data-glyph-times="[6]">乙</text>'

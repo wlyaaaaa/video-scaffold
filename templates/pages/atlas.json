@@ -1,5 +1,5 @@
 {
-  "schema":"pagesv1",
+  "schema":"video-scaffold.pages.v1",
   "theme":"white-green",
   "render_height":1080,
   "out":"../_samples/checkpoint/atlas.mp4",

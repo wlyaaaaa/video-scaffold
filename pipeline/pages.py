@@ -778,6 +778,18 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
         print(__doc__); return 2
+    if argv[0] == "assemble":
+        from pipeline.pages_assemble import main as assemble
+        return assemble(argv[1:])
+    if argv[0] in ("init", "atlas"):
+        import argparse
+        from pipeline.pages_init import initialize
+        parser = argparse.ArgumentParser(description="在空目录创建白底绿图文页影片")
+        parser.add_argument("target")
+        parser.add_argument("--render", action="store_true")
+        args = parser.parse_args(argv[1:])
+        print(initialize(args.target, atlas=argv[0] == "atlas", render=args.render))
+        return 0
     project = Project(argv[0])
     cmd = argv[1] if len(argv) > 1 else "plan"
     if cmd == "plan":

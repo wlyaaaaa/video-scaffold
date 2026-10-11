@@ -1,6 +1,6 @@
 # 当前工作流与验收
 
-本页说明分镜配音入口；项目规则见根目录 AGENTS.md。分镜生产画布仍为 3840×2160、60fps，默认使用 AV1 NVENC；改画幅需要同时修改设计模板、组件和背景，不能只改宽高就宣称竖屏已受支持。
+本页说明默认图文页路线及既有分镜配音入口；项目规则见根目录 AGENTS.md。分镜生产画布仍为 3840×2160、60fps，默认使用 AV1 NVENC；改画幅需要同时修改设计模板、组件和背景，不能只改宽高就宣称竖屏已受支持。
 
 网页作品走独立 [webfilm](../webfilm/README.md)，入口是 `pwsh -File .\webfilm\run.ps1 <命令>` 或 `python -m webfilm <命令>`，不经根 `run.ps1`。主流程是发布当天给双方同一份 CONTRACT、创作要求和工具，各生成 v1，再 render → review → 返回原模型修改一次 → render v2，保留前后版本；[命令示例](../webfilm/README.md) 按双方分别执行。check 校验约定，compare 检查重复捕获，后期命令处理已选产物。普通网页 discover/capture 与自行导出 MP4 是附加能力；demo 是 AI 补充的渲染验收材料。默认 4K 60fps，也可统一指定 1080p；机器路径通过运行适配提供，不复制私人配音、素材或旧场景。来源声明与人工观看独立于结构检查。
 
@@ -20,7 +20,7 @@
 
 普通生产顺序：scripts → tts → timing → prompts → 审阅 SVG → build → lint → preview/serve → 人工审阅 → render → merge → cover/chapters → 可选 subtitles → verify/manifest → 人工观看。
 
-图文页（写法见 [AUTHORING 图文页](AUTHORING.md#图文页一页上元素按念到的词进来)）可以用已有配音直接走分镜表：`python -m pipeline.pages <表.json> plan` 看每页起止和每个元素的时刻，`stills` 无头抽每页最后一刻，`render` 出 4K 画面轨（默认 CPU H.264，`"encoder": "gpu"` 用配置里的编码器）、拼配音、按主题烧字幕，最后出 1080p 可播放副本。它自己设好主题底色背景、`CINEMATIC = False`、`TRANSITION_SECONDS = 0`，中间文件都在表里 `work` 指的目录，不写进当前工程的 scene_html/output。只取一段配音里的几句时，切点取在前后两词停顿的正中。表改了重跑即可；配音换了（例如单句重配后）重跑会按新词轴重新对时，绑词写的是原文，不用改表。
+讲解类默认走下方“图文页：开工、并行与整片”路线。已有分镜配音工程仍按本页对应阶段运行；图文页不调用外部 TTS，不生成或改写生产词轴。
 
 `pipeline.author.generate()` 保持未绑定；人或当前 AI 直接写静态 SVG 是正常路径，并非缺少自动化。
 
@@ -72,15 +72,69 @@ subtitles 生成全片 SRT/WebVTT，不烧进画面，并绑定词轴来源。ma
 
 要给本人看或上传的烧字幕副本另做，不改 final_output.mp4 和 delivery.json：`subtitles.karaoke_ass(原文, 词轴, duration, reveal=True)` 按当前主题出 ASS，按标点分句、念到后逐步显字，当前词用强调色；`reveal=False` 保留传统整句字幕选项。`subtitles.playable_copy(成片, 输出, ass=…, audio=…)` 给出 1080p H.264 High@4.2、yuv420p、BT.709、AAC、faststart 的 ffmpeg 命令。原文要和词轴逐字对得上（空格和标点不算），对不上直接报错，不猜。
 
-## 图文页：分镜表到有声动画
+## 图文页：开工、并行与整片
 
-在底座运行 `python -m pipeline.pages <本期/pages/段落.json> plan|stills|render`。`plan` 核对实际起止与绑词；`stills` 用本机 Chrome 无头出关键帧；`render` 复用既有构建、布局检查和逐帧渲染，再接同一段配音与逐步显示字幕。几段同时出片时套上排队：`python -m pipeline.render_queue -- python -m pipeline.pages <表.json> render`，全机同时出片数和可用内存都够才放行（`VIDEO_RENDER_SLOTS` 默认 2，`VIDEO_RENDER_MIN_FREE_GB` 默认 14）。全部素材、片段和中间产物在本期目录；下一段只换配音、素材和镜头，不复制底座代码。字段及参考研究方法见 AUTHORING.md“图文页”。
+从 video-scaffold 根目录执行，影片目录必须为空：
 
-真实截图用 `screenshot` 元素直接引用原文件。字幕取原配音文字，截图整体在关联数字或事实已念到后贴入；来源图的既有界面文字按截图内容展示，不拆成重新绘制的字幕。原图不裁切、不覆盖，强调框为独立 SVG 图层。
+```powershell
+python -m pipeline.pages init E:/VideoProductions/新一期 --render
+python -m pipeline.pages <影片/pages/段落.json> plan
+python -m pipeline.pages <影片/pages/段落.json> stills 3.0 5.0
+python -m pipeline.pages <影片/pages/段落.json> render
+```
 
-拆段接片时，前段的 `tail` 是供单独预览的额外停留，可在合成时按帧去除，以恢复原句间停顿；后段的四项 `progress` 从前段终值继续。修改已审定样片时另起输出版本名，原片保留。最终交付可按要求做一次同口径变化帧统计和每秒联系表；这些统计只说明变化程度，不代表主观品质分数或已完成真人有声观看。
+`init` 搭好 pages、art、narration、assets、_samples/checkpoint 和登记 README；`--render` 实际产出 6 秒可播放试片。它使用明确标注的合成测试音，只验证管线。正式创作将 `narration` 指向本期已定稿的音频、原文、真实词轴；不覆盖示例以外的原件，不复制其他期素材。
 
-创作先看选定参照的原生帧与作者提示要点，再用已有原语安排文字、主视觉、图表、持续运动和换页。动作时长、字号、分组、照片推近和抠图轻浮动集中在 `PAGE_MOTION` 或表中覆盖；没有“出现后必须静止”的限制。缺词、负偏移会阻止出片；长时间没有主内容动作只警告，返回构图和分镜调整。进度条在整段连续走，不把进度条变化当作主视觉动画。
+`plan` 只读，核对绑词、逐字时间和动画退场，不生成背景、不抽录屏帧。`stills` 与 `render` 复用相同检查。`render` 构建 SVG/HTML、检查布局、生成画面轨，再合入原配音与逐字字幕，输出可播放的 H.264/AAC 1080p 副本；各步骤的中间文件位于分镜表 `work`。坐标仍使用 3840×2160；可用 `render_height: 1080` 在浏览器捕获阶段整体缩放，保持构图；默认 `2160` 先生成 4K 轨道再下采样。此默认可按同帧对比结果调整，不是本人定过的硬要求。
+
+`render` 和 `stills` 已内置全机先来后到排队，直接调用 Project 方法也排队。旧 `python -m pipeline.render_queue -- <命令>` 仍兼容，不重复占位。固定队列目录不随各任务 TEMP 改变；名额持有操作系统锁，进程退出自动回收。`VIDEO_RENDER_SLOTS` 默认 2，已有任务时 `VIDEO_RENDER_MIN_FREE_GB` 默认要求至少 14 GiB 可用内存；这些是 AI 估值，可改。编码路数在放行后按当前内存和全部名额预算计算，默认 1—4 路；`VIDEO_RENDER_WORKERS` 仍可显式覆盖。日志记录票号、到达/放行时刻、等待时长、可用内存与实际路数。它是资源估算，不能承诺其他程序永远不改变可用内存。
+
+几段并行各用自己的底座工作副本和本期不同的 work/out 路径；不要共写同一个输出。共用代码由一个合并负责人按段落顺序整合。每段使用完整的一张表出片，段与段在拼接表中连接；同段中途拆开会改变动画边界，需要单独验证。
+
+### 已通过画面与新内容
+
+默认文字按原文的实际词轴逐字出现；重复词选择对应的 cue。染色覆盖层不得先于底字，概括字样须明确 `summary: true`。新内容的提前文字、未放完的有限动画会阻止 plan 和出片。
+
+已审定元素的 `hold_check: "warn"` 同时作用于动画和逐字检查，只提示；只能在本期明确审定的范围使用。给旧表新增该标记时同时用 `preserve_svg: true`，校验包装只存在于检查副本，真正输出的 SVG 字节不变；已有旧标记保持原包装兼容。不能为让新表过检查而擅自加此标记。
+
+```powershell
+python -m pipeline.page_compare snapshot <影片/pages目录> <证据/之前.json>
+# 在独立底座工作副本中修改通用代码后：
+python -m pipeline.page_compare snapshot <影片/pages目录> <证据/之后.json>
+python -m pipeline.page_compare compare <证据/之前.json> <证据/之后.json> <证据/差异.json>
+```
+
+快照生成完整页和每元素片段，逐字节比较并报告页、元素；不把无法识别的元素算作相同。旧基线缺新版式时，再对照各段实际出片分支的片段。选填的 `rail.replay`、`chat.text_with_bubble`、`level.compact_veil` 等用于复现明确选过的效果，不偷偷改全部旧页。
+
+### 版式一览
+
+```powershell
+python -m pipeline.pages atlas E:/VideoProductions/版式一览 --render
+```
+
+此命令在空目录生成 [一览分镜表](../templates/pages/atlas.json)、明确标注的测试音、可播放片及 `_samples/atlas-contacts-*.png` 每秒联系表。画面标有元素名；可打开某张表只看其中一类。新增注册版式同步加一个示例；测试只核对注册名是否包含在表里。一览展示能力，不规定每期的风格组合或镜头数量。
+
+### 整片与章节
+
+```powershell
+python -m pipeline.pages assemble <影片/pages/拼接表.json> --plan
+python -m pipeline.pages assemble <影片/pages/拼接表.json>
+```
+
+拼接表写 `parts: [{id, path}]`、新文件名 `out`、`chapters: [{title, from: 段id}]`，可选 `max_title_chars`。章的起点对应所选段；省略中间段的章起点即可把几段合并一章。本期方案为 6 章、每章不超过 6 字，此数目不固定给往后各期。
+
+AI 取法，可改：60fps 下按实际片尾静音检测，每个非末段保留到念完约 0.45 秒，接口以 0.2 秒画面叠化接下一段，最后一段保留收尾。音频顺序串接，全部时刻量化为整帧；视频多留叠化余量，不从旁白里扣时间。沿用已通过各段的文字、声音和画面。输出同名前缀的 `.chapters.txt` 和 `.assembly.json`，记录每段裁剪、段起点、章节及最终流信息；已有输出一律拒绝覆盖。自动核对总帧数和音视频/容器时长，误差须小于 1 帧。此检查不等于真人已听看整片，也不产生投稿授权。
+
+### 生图派单
+
+```powershell
+python -m pipeline.image_jobs generate <图片清单.json> <新派单目录>
+python -m pipeline.image_jobs accept <某图.result.json> --saved-path <生成源文件> --run-dir <实际任务目录> --note <看图后的核验说明>
+```
+
+清单顶层为 `source`（本次需求出处）、`repository`（底座绝对路径）、`base_ref`，以及 `images: [{name, purpose, prompt, references: [绝对路径], output: 绝对路径}]`。用 JSON 序列化生成清单，别在解释器字符串里手写反斜杠。工具原样写入 Markdown，不经 shell 二次转义；控制字符、未展开的变量、重复派单或目标均报错。新图按版本命名，生成后核对真实文件，再看图并显式登记；planned 回执不是已生图或已验收。
+
+生成提示可直接交给 Codex 内置生图。通过本机包装器派 Luna 时，先做该包装器当前版本的 DryRun；通用包装器的字段规则由基座负责，项目派单不额外补写本项目禁止的提醒。派单职责和已定要求见 [派单模板](../templates/pages/assignment.md)。
 
 verify 检查完整来源链、视频与音频流、画布、编码、帧率、预期总帧数和总时长、可确定的流时长和起点、PNG 封面以及章节来源和范围。不能用两个同样短的音视频流或文件存在冒充完整交付。READY 只表示自动结构验收通过，不表示人工看过、语音绝对准确或已经投稿。
 
