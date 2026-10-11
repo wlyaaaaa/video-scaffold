@@ -407,6 +407,21 @@ def icon(ctx, name, cx, cy, size, t0):
                f"M{_r(cx - s * 0.5)},{_r(cy - s * 0.05)} L{_r(cx - s)},{_r(cy + s * 0.4)} "
                f"L{_r(cx - s * 0.5)},{_r(cy + s * 0.85)}")
         return ring + draw(top, t0 + 0.1, 0.4) + draw(bot, t0 + 0.35, 0.4, color=ink)
+    if name == "clip":     # 回形针（附上证据）：一笔描出
+        s = r * 0.9
+        d = (f"M{_r(cx + s * 0.28)},{_r(cy - s * 0.35)} L{_r(cx + s * 0.28)},{_r(cy + s * 0.55)} "
+             f"A{_r(s * 0.28)},{_r(s * 0.28)} 0 0 1 {_r(cx - s * 0.28)},{_r(cy + s * 0.55)} "
+             f"L{_r(cx - s * 0.28)},{_r(cy - s * 0.62)} A{_r(s * 0.2)},{_r(s * 0.2)} 0 0 1 {_r(cx + s * 0.12)},"
+             f"{_r(cy - s * 0.62)} L{_r(cx + s * 0.12)},{_r(cy + s * 0.4)}")
+        return ring + draw(d, t0 + 0.1, 0.55, color=ink, w=sw * 1.1)
+    if name == "noloop":   # 循环箭头（再来一轮）描出后被一道斜线划掉
+        s = r * 0.62
+        arc = (f"M{_r(cx + s)},{_r(cy)} A{_r(s)},{_r(s)} 0 1 1 {_r(cx + s * 0.5)},{_r(cy - s * 0.87)}")
+        tip = (f"M{_r(cx + s * 0.18)},{_r(cy - s * 1.12)} L{_r(cx + s * 0.55)},{_r(cy - s * 0.85)} "
+               f"L{_r(cx + s * 0.22)},{_r(cy - s * 0.5)}")
+        slash = f"M{_r(cx - r * 0.72)},{_r(cy + r * 0.72)} L{_r(cx + r * 0.72)},{_r(cy - r * 0.72)}"
+        return (ring + draw(arc, t0, 0.45, color=ink, w=sw) + draw(tip, t0 + 0.4, 0.15, color=ink, w=sw)
+                + draw(slash, t0 + 0.5, 0.25, color=a, w=sw * 1.3))
     raise ValueError(f"unknown icon {name!r}")
 
 

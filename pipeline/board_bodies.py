@@ -552,6 +552,13 @@ def todo(ctx, part, x, top, w, room, pad, t0):
             body += (f'<path data-anim="draw" data-delay="{_r(drop)}" data-dur="0.3" d="M{_r(tx - 10)},{_r(cy)} '
                      f'L{_r(tx + tw + 10)},{_r(cy)}" stroke="{ink}" stroke-width="9" stroke-linecap="round"/>')
             body = B.keys([[0, 0, 0, 1, 1], [drop + 0.45, 0, 0, 1, 1], [drop + 0.85, 30, 0, 1, 0]], body)
+        if it.get("focus_at"):        # 只看这一条：绿框描出来
+            ft = ctx.at(it["focus_at"])
+            body += (f'<rect data-anim="draw" data-delay="{_r(ft)}" data-dur="0.4" x="{_r(x0 - 14)}" y="{_r(ry - 14)}" '
+                     f'width="{_r(iw + 28)}" height="{_r(rh + 28)}" rx="30" fill="none" stroke="{a}" stroke-width="9"/>')
+        if it.get("dim_at") and drop is None:     # 不再看的条目变淡
+            dt = ctx.at(it["dim_at"])
+            body = B.keys([[0, 0, 0, 1, 1], [dt, 0, 0, 1, 1], [dt + 0.35, 0, 0, 1, part.get("dim", 0.3)]], body)
         if not it.get("absent"):     # absent：这一条一开始就不在，只留虚线空位或之后补回
             out.append(B.anim("fade-up", at, 0.35, body, ' data-shift="30"'))
         if it.get("ghost_at"):

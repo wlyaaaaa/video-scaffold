@@ -23,6 +23,13 @@ def line(ctx, d, at, dur=0.6, *, color="accent", sw=8, extra=""):
             f'stroke-linejoin="round"{extra}/>')
 
 
+def dashed(ctx, d, at, dur=0.5, *, color="faint", sw=6, dash="4 22", direction="left"):
+    """虚线按方向揭开（描线原语会覆盖虚线样式，所以虚线用幕布揭示）。"""
+    return (f'<g data-anim="wipe" data-dir="{direction}" data-delay="{at:.4f}" data-dur="{dur:g}">'
+            f'<path d="{d}" fill="none" stroke="{ctx.col(color)}" stroke-width="{sw:g}" stroke-linecap="round" '
+            f'stroke-dasharray="{dash}"/></g>')
+
+
 def label(ctx, s, cue, x, y, size=84, **opts):
     return B.text(ctx, s, x, y, size, ctx.glyphs(B.plain_of(s), cue), **opts)
 
@@ -949,7 +956,316 @@ def tree(ctx, el):
     return "".join(out)
 
 
+def _party(ctx, node, cx, cy, r, at, *, ring="ink"):
+    """代表某一方的圆：有 logo 放标志，没有就画白底黑圈加绿芯（以后换标志不改版式）。"""
+    if node.get("logo"):
+        return B.anim("pop", at, .45, B.brand_mark(ctx, node["logo"], cx, cy, r, ring=ring, sw=max(5, r * .06)))
+    return B.anim("pop", at, .45, circle(cx, cy, r, "#FFFFFF", stroke=ctx.col(ring), sw=max(6, r * .07))
+                  + circle(cx, cy, r * .34, ctx.col("accent")))
+
+
+def _doc(ctx, w, h):
+    """一份交付物（局部坐标 0,0 起）：白纸、折角、三行字线。"""
+    ink, block = ctx.col("ink"), ctx.col("block")
+    f = w * .28
+    out = (f'<path d="M0,0 L{w - f:g},0 L{w:g},{f:g} L{w:g},{h:g} L0,{h:g} Z" fill="#FFFFFF" stroke="{ink}" '
+           f'stroke-width="6" stroke-linejoin="round"/>'
+           f'<path d="M{w - f:g},0 L{w - f:g},{f:g} L{w:g},{f:g}" fill="{block}" stroke="{ink}" stroke-width="5" '
+           f'stroke-linejoin="round"/>')
+    for k, lw in enumerate((.62, .7, .46)):
+        out += rect(w * .16, h * (.42 + k * .17), w * lw, h * .07, ink if k == 0 else ctx.col("faint"), radius=h * .035)
+    return out
+
+
+def handoff(ctx, el):
+    """一方做、另一方审：每行左边做的、右边审的，交付物沿箭头递过去，审的一方到点打勾。
+    同一方在上一行审、下一行做时，可用 chain 画一道虚线把两次身份连起来。"""
+    cfg = el["handoff"]
+    x, y, w = el.get("x", 600), el.get("y", 1150), el.get("w", 2500)
+    gap, r = el.get("row_gap", 420), el.get("r", 120)
+    a, ink, rule = ctx.col("accent"), ctx.col("ink"), ctx.col("rule")
+    x0, x1 = x, x + w
+    out, nodes = [], []
+    for k, hd in enumerate(cfg.get("heads", [])[:2]):
+        hx = x0 if k == 0 else x1
+        out.append(label(ctx, hd["text"], hd["at"], hx, y - r - el.get("head_gap", 90), hd.get("size", 110),
+                         anchor="middle", fill="accent" if k else "ink"))
+    for k, row in enumerate(cfg["rows"]):
+        ry = y + k * gap
+        fr, to = row["from"], row["to"]
+        tf, tt = ctx.at(fr["at"]), ctx.at(to["at"])
+        if tt <= tf:
+            raise ValueError("handoff: to.at must follow from.at")
+        ls = el.get("label_size", 96)
+        out.append(_party(ctx, fr, x0, ry, r, tf))
+        out.append(label(ctx, fr["label"], fr.get("label_at") or fr["at"], x0, ry + r + ls + 20, ls, anchor="middle"))
+        # 箭头从做的一方画向审的一方，画完正好轮到念审的一方
+        sx, ex = x0 + r + 40, x1 - r - 40
+        d = f'M{sx:g},{ry:g} L{ex:g},{ry:g}'
+        ld = max(.3, tt - tf - .25)
+        out.append(line(ctx, d, tf + .2, ld, color="faint", sw=12, extra=' data-ease="in-out"'))
+        head = (f'M{ex - 52:g},{ry - 40:g} L{ex:g},{ry:g} L{ex - 52:g},{ry + 40:g}')
+        out.append(line(ctx, head, tf + .2 + ld - .05, .25, color="faint", sw=12))
+        # 交付物：从做的一方身边出发，沿箭头走到审的一方跟前
+        dw, dh = r * 1.05, r * 1.3
+        sx_doc, ex_doc = sx + 20, ex - dw - 90
+        track = [[0, sx_doc, ry - dh / 2, .6, 0], [tf + .2, sx_doc, ry - dh / 2, .6, 0],
+                 [tf + .45, sx_doc, ry - dh / 2 - 40, 1, 1], [tt, ex_doc, ry - dh / 2 - 40, 1, 1]]
+        out.append(B.keys(track, _doc(ctx, dw, dh)))
+        out.append(_party(ctx, to, x1, ry, r, tt, ring="accent"))
+        out.append(label(ctx, to["label"], to.get("label_at") or to["at"], x1, ry + r + ls + 20, ls,
+                         anchor="middle", fill="accent"))
+        if row.get("check_at"):
+            ct = ctx.at(row["check_at"])
+            cx_, cy_, br = x1 + r * .78, ry - r * .78, r * .42
+            out.append(B.anim("pop", ct, .3, circle(cx_, cy_, br, a) + circle(cx_, cy_, br, "none", stroke="#FFFFFF", sw=6)))
+            out.append(f'<path data-anim="draw" data-delay="{ct + .08:.4f}" data-dur="0.22" '
+                       f'd="M{cx_ - br * .44:g},{cy_ + br * .02:g} L{cx_ - br * .12:g},{cy_ + br * .34:g} '
+                       f'L{cx_ + br * .48:g},{cy_ - br * .3:g}" fill="none" '
+                       f'stroke="#FFFFFF" stroke-width="{br * .22:g}" stroke-linecap="round" stroke-linejoin="round"/>')
+            out.append(pulse(ctx, x1, ry, r * 1.35, ct + .1))
+        nodes.append((row, ry))
+    # chain：上一行审的一方 = 下一行做的一方（同一个名字），虚线连起两次出场
+    if cfg.get("chain"):
+        for (ra, ya), (rb, yb) in zip(nodes, nodes[1:]):
+            if ra["to"]["label"] != rb["from"]["label"]:
+                continue
+            tb = ctx.at(rb["from"]["at"])
+            d = (f'M{x1 - r * .7:g},{ya + r * .7:g} C{x1 - 300:g},{ya + gap * .55:g} '
+                 f'{x0 + 300:g},{yb - gap * .55:g} {x0 + r * .7:g},{yb - r * .7:g}')
+            out.insert(0, dashed(ctx, d, tb - .15, .45, color="faint", sw=8, dash="2 22", direction="right"))
+    return "".join(out)
+
+
+def layers(ctx, el):
+    """几层把关（瑞士奶酪）：每层板上有洞，问题点从左飞来，穿过洞就漏过这一层，撞上实心处就被拦下；
+    align 让后一层的洞挪到和前一层对齐（看的是同一份东西，盲区重合），之后的问题点一路穿过。"""
+    cfg = el["layers"]
+    x, y, w, h = el.get("x", 1900), el.get("y", 560), el.get("w", 1700), el.get("h", 1100)
+    a, ink, rule, block, page = (ctx.col(k) for k in ("accent", "ink", "rule", "block", "page"))
+    slabs = cfg["slabs"]
+    n = len(slabs)
+    sw = el.get("slab_w", 150)
+    hole_ry = el.get("hole_h", h * .12) / 2
+    hole_rx = sw * .36
+    xs = [x + w * (k + 1) / (n + 1) for k in range(n)]
+    align = cfg.get("align")
+    al_t = ctx.at(align["at"]) if align else None
+    al_d = align.get("dur", .7) if align else 0
+    hits = {k: [] for k in range(n)}
+    shots = cfg.get("shots", [])
+    plans = []
+    x_start, x_end = x - el.get("lead", 40), x + w - el.get("tail", 60)
+    for s in shots:
+        t0 = ctx.at(s["at"])
+        lane = y + h * s["lane"]
+        stop = s.get("stop")
+        if stop is None:
+            xe, t_end = x_end, ctx.at(s["end_at"]) if s.get("end_at") else t0 + s.get("dur", 1.1)
+        else:
+            xe = xs[stop] - sw / 2 - s.get("r", 44) - 6
+            t_end = ctx.at(s["hit_at"]) if s.get("hit_at") else t0 + s.get("dur", .9)
+            hits[stop].append(t_end)
+        if t_end <= t0 + .2:
+            raise ValueError("layers: shot needs at least 0.2s to travel")
+        plans.append((s, t0, lane, xe, t_end))
+    out = []
+    for k, sl in enumerate(slabs):
+        cx, at = xs[k], ctx.at(sl["at"])
+        depth = sw * .32
+        body = (rect(cx - sw / 2 + depth, y - depth, sw, h, block, radius=26, stroke=ink, sw=5)
+                + f'<path d="M{cx - sw / 2 + 10:g},{y + 4:g} L{cx - sw / 2 + depth + 10:g},{y - depth + 4:g}" stroke="{ink}" stroke-width="5"/>'
+                + rect(cx - sw / 2, y, sw, h, "#FFFFFF", radius=26, stroke=ink, sw=6))
+        for j, f in enumerate(sl["holes"]):
+            hy = y + h * f
+            hole = (f'<ellipse cx="{cx:g}" cy="{hy:g}" rx="{hole_rx:g}" ry="{hole_ry:g}" fill="{page}" stroke="{ink}" stroke-width="5"/>'
+                    f'<ellipse cx="{cx + hole_rx * .18:g}" cy="{hy - hole_ry * .2:g}" rx="{hole_rx * .72:g}" ry="{hole_ry * .62:g}" '
+                    f'fill="{block}"/>')
+            if align and align.get("slab") == k:
+                dy = h * align["to"][j] - h * f
+                hole = B.keys([[0, 0, 0, 1, 1], [al_t, 0, 0, 1, 1], [al_t + al_d, 0, dy, 1, 1]], hole)
+            body += hole
+        for ht in hits[k]:
+            body = f'<g data-anim="shake" data-delay="{ht:.4f}" data-amp="14">{body}</g>'
+        out.append(B.anim("fade-up", at, .5, body, ' data-shift="60"'))
+        if sl.get("label"):
+            out.append(label(ctx, sl["label"], sl.get("label_at") or sl["at"], cx, y + h + 150,
+                             sl.get("size", 100), anchor="middle"))
+        if sl.get("logo"):
+            out.append(B.anim("pop", ctx.at(sl.get("label_at") or sl["at"]), .4,
+                              B.brand_mark(ctx, sl["logo"], cx, y - depth - 110, 70)))
+    if align and align.get("label"):
+        out.append(label(ctx, align["label"], align.get("label_at") or align["at"], (xs[0] + xs[-1]) / 2,
+                         y - 150, align.get("size", 80), anchor="middle", font="sans", weight=800, fill="accent"))
+        if n > 1:
+            for f in align["to"]:
+                hy = y + h * f
+                out.append(dashed(ctx, f'M{xs[0]:g},{hy:g} L{xs[-1]:g},{hy:g}', al_t + al_d, .4, color="accent", sw=6,
+                                  dash="14 18"))
+    for s, t0, lane, xe, t_end in plans:
+        r = s.get("r", 44)
+        if s.get("glyph") == "image":   # 一组图（3×3 小方块）代替圆点，用来指认“那九张图”
+            cell, g = r * .56, r * .14
+            dot = rect(-r, -r, 2 * r, 2 * r, "#FFFFFF", radius=14, stroke=ink, sw=5)
+            for q in range(9):
+                dot += rect(-r + g * 1.3 + (q % 3) * (cell + g * .5), -r + g * 1.3 + (q // 3) * (cell + g * .5),
+                            cell, cell, a, radius=4)
+        else:
+            dot = circle(0, 0, r, ink) + circle(-r * .3, -r * .3, r * .28, "#FFFFFF", extra=' fill-opacity="0.35"')
+        pid = B._id("shot")
+        path = f'<path id="{pid}" d="M{x_start:g},{lane:g} L{xe:g},{lane:g}" fill="none" stroke="none"/>'
+        mover = (f'<g data-anim="move-along" data-ease="linear" data-delay="{t0:.4f}" data-dur="{t_end - t0:.4f}" '
+                 f'data-path="#{pid}" data-x0="0" data-y0="0">{dot}</g>')
+        trail = line(ctx, f'M{x_start:g},{lane:g} L{xe:g},{lane:g}', t0, t_end - t0, color="rule", sw=8,
+                     extra=' data-ease="linear"')
+        stop = s.get("stop")
+        group = [path + trail + mover]
+        speed = (xe - x_start) / (t_end - t0)
+        for k, cx in enumerate(xs):     # 穿过的每一层，洞口闪一下
+            if (stop is None or k < stop) and x_start < cx < xe:
+                tp = t0 + (cx - x_start) / speed
+                ring = (f'<ellipse cx="{cx:g}" cy="{lane:g}" rx="{hole_rx + 18:g}" ry="{hole_ry + 18:g}" fill="none" '
+                        f'stroke="{a}" stroke-width="8"/>')
+                group.append(B.anim("pop", tp - .05, .3, ring))
+        if stop is not None:
+            hx = xs[stop] - sw / 2
+            group.append(f'<g transform="translate({hx:g},{lane:g})"><circle data-anim="shockwave" data-delay="{t_end:.4f}" '
+                         f'data-dur="0.6" data-max="3.2" r="{r * 1.1:g}" fill="none" stroke="{a}" stroke-width="8"/></g>')
+        if s.get("label"):
+            lt = s.get("label_at") or s["at"]
+            ls = s.get("size", 92)
+            if stop is None:     # 漏过去的：名字写在停下的点上方
+                group.append(label(ctx, s["label"], lt, xe, lane - r - 44, ls, anchor="middle", fill="ink"))
+            else:                # 被拦下的：名字写在这一层右侧
+                group.append(label(ctx, s["label"], lt, xs[stop] + sw / 2 + 60, lane + ls * .36, ls, fill="accent"))
+        # 被拦下的点到 clear_at（默认洞对齐时）淡出，免得卡在挪过来的洞口
+        clear = s.get("clear_at") or (align["at"] if (align and stop is not None) else None)
+        body = "".join(group)
+        out.append(B.anim("fade-out", ctx.at(clear), .3, body) if clear else body)
+    return "".join(out)
+
+
+def gate(ctx, el):
+    """只把挑定的几样递给接收方：几张签条在左边按念到出现，依次飞进右边的空位；
+    被挡下的那张在半路撞上闸门弹回、变淡划掉。"""
+    cfg = el["gate"]
+    x, y, w = el.get("x", 240), el.get("y", 620), el.get("w", 3360)
+    a, ink, rule = ctx.col("accent"), ctx.col("ink"), ctx.col("rule")
+    items = cfg["items"]
+    ch, cgap = el.get("chip_h", 170), el.get("chip_gap", 60)
+    size = el.get("size", 92)
+    cw = el.get("chip_w", 900)
+    rcv = cfg["receiver"]
+    rx, rw = x + w - el.get("receiver_w", 1300), el.get("receiver_w", 1300)
+    passing = [k for k, it in enumerate(items) if not it.get("block_at")]
+    rh = el.get("receiver_h", 220 + len(passing) * (ch + 40) + 60)
+    ry = y
+    bx = el.get("barrier_x", (x + cw + rx) / 2)
+    out = []
+    # 接收方：卡片、小标签、眼睛图标、几个虚线空位
+    ra = ctx.at(rcv["at"])
+    sid = B._id("gate")
+    box = (f'<defs><filter id="{sid}" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="18" '
+           f'stdDeviation="30" flood-color="#1A1A17" flood-opacity="0.07"/></filter></defs>'
+           + rect(rx, ry, rw, rh, "#FFFFFF", radius=36, stroke=rule, extra=f' filter="url(#{sid})"'))
+    out.append(B.anim("fade-up", ra, .5, box, ' data-shift="70"'))
+    out.append(label(ctx, rcv["label"], rcv.get("label_at") or rcv["at"], rx + 80, ry + 150, rcv.get("size", 110)))
+    if rcv.get("logo"):
+        out.append(B.anim("pop", ra + .2, .4, B.brand_mark(ctx, rcv["logo"], rx + rw - 150, ry + 110, 70)))
+    else:
+        out.append(B.icon(ctx, rcv.get("icon", "eye"), rx + rw - 150, ry + 110, 130, ra + .2))
+    slots = []
+    st = ctx.at(rcv["slots_at"]) if rcv.get("slots_at") else ra + .3
+    for j, k in enumerate(passing):
+        sx, sy = rx + 80, ry + 250 + j * (ch + 40)
+        slots.append((sx, sy))
+        out.append(B.anim("pop", st + j * .12, .35, rect(sx, sy, rw - 160, ch, ctx.col("page"), radius=ch / 2,
+                                                       stroke=ctx.col("faint"), sw=5, extra=' stroke-dasharray="20 16"')))
+    # 闸门：被挡的那张来时落下
+    blocked = [it for it in items if it.get("block_at")]
+    if blocked:
+        gt = ctx.at(cfg["barrier_at"]) if cfg.get("barrier_at") else ctx.at(blocked[0]["block_at"])
+        gy0, gy1 = y + el.get("barrier_top", 0), y + el.get("barrier_h", rh)
+        out.append(line(ctx, f'M{bx:g},{gy0:g} L{bx:g},{gy1:g}', gt, .35, color="ink", sw=14))
+        out.append(B.icon(ctx, "lock", bx, gy0 - 90, 120, gt + .15))
+    slot_i = 0
+    for k, it in enumerate(items):
+        cy = y + k * (ch + cgap) + el.get("chip_top", 60)
+        at = ctx.at(it["at"])
+        g = ctx.glyphs(B.plain_of(it["text"]), it.get("text_at") or it["at"])
+        tw = ctx.width(B.plain_of(it["text"]), size)
+        cwk = max(cw * .55, min(cw, tw + 200))
+        chip = (rect(0, 0, cwk, ch, "#FFFFFF", radius=ch / 2, stroke=ink if not it.get("block_at") else rule, sw=5)
+                + rect(40, ch / 2 - 30, 60, 60, a if not it.get("block_at") else ctx.col("faint"), radius=30))
+        body = chip + B.text(ctx, it["text"], 130, ch / 2 + size * .36, size, g, settle=False)
+        if it.get("block_at"):
+            bt = ctx.at(it["block_at"])
+            reach = bx - x - cwk - 18
+            track = [[0, 0, 0, 1, 1], [bt, 0, 0, 1, 1], [bt + .3, reach, 0, 1, 1], [bt + .55, reach - 90, 0, 1, 1]]
+            if it.get("dim_at"):
+                dt = ctx.at(it["dim_at"])
+                if dt < bt + .55:
+                    raise ValueError("gate: dim_at must come after the bounce")
+                track += [[dt, reach - 90, 0, 1, 1], [dt + .35, reach - 90, 0, 1, .38]]
+                body += (f'<path data-anim="draw" data-delay="{dt:.4f}" data-dur="0.3" d="M110,{ch / 2:g} L{cwk - 50:g},{ch / 2:g}" '
+                         f'stroke="{ink}" stroke-width="10" stroke-linecap="round"/>')
+            inner = B.keys(track, body)
+            out.append(f'<g transform="translate({x:g},{cy:g})">' + B.anim("fade-up", at, .4, inner, ' data-shift="40"') + '</g>')
+            out.append(f'<g transform="translate({bx:g},{cy + ch / 2:g})"><circle data-anim="shockwave" '
+                       f'data-delay="{bt + .3:.4f}" data-dur="0.6" data-max="2.6" r="70" fill="none" stroke="{ink}" '
+                       f'stroke-width="7"/></g>')
+            continue
+        sx, sy = slots[slot_i]
+        slot_i += 1
+        mt = ctx.at(it["move_at"]) if it.get("move_at") else max(g) + it.get("wait", .3)
+        s = min(1.0, (rw - 160) / cwk)
+        track = [[0, 0, 0, 1, 1], [mt, 0, 0, 1, 1], [mt + .55, sx - x, sy - cy, s, 1]]
+        inner = B.keys(track, body)
+        out.append(f'<g transform="translate({x:g},{cy:g})">' + B.anim("fade-up", at, .4, inner, ' data-shift="40"') + '</g>')
+        out.append(B.anim("pop", mt + .5, .3, rect(sx - 10, sy - 10, rw - 140, ch + 20, "none", radius=(ch + 20) / 2,
+                                                  stroke=a, sw=8)))
+    return "".join(out)
+
+
+def verdict(ctx, el):
+    """一句交回来的结论（如“做完了”）：带勾的胶囊弹出；到 doubt_at 勾变灰、盖上黑色问号、胶囊一震。"""
+    cfg = el["verdict"]
+    x, y = el.get("x", 2200), el.get("y", 1500)
+    size = cfg.get("size", 120)
+    a, ink = ctx.col("accent"), ctx.col("ink")
+    at = ctx.at(el["at"])
+    txt = cfg["text"]
+    g = ctx.glyphs(B.plain_of(txt), cfg.get("text_at") or el["at"])
+    h = size * 1.9
+    tw = ctx.width(B.plain_of(txt), size)
+    w = tw + h + 120
+    sid = B._id("vd")
+    pill = (f'<defs><filter id="{sid}" x="-10%" y="-20%" width="120%" height="160%"><feDropShadow dx="0" dy="16" '
+            f'stdDeviation="24" flood-color="#1A1A17" flood-opacity="0.12"/></filter></defs>'
+            + rect(0, 0, w, h, "#FFFFFF", radius=h / 2, stroke=ctx.col("rule"), extra=f' filter="url(#{sid})"'))
+    cx, cy = h / 2, h / 2
+    disc = circle(cx, cy, h * .33, a)
+    tick = (f'<path data-anim="draw" data-delay="{at + .25:.4f}" data-dur="0.3" '
+            f'd="M{cx - h * .14:g},{cy + h * .01:g} L{cx - h * .04:g},{cy + h * .11:g} L{cx + h * .15:g},{cy - h * .1:g}" '
+            f'fill="none" stroke="#FFFFFF" stroke-width="{h * .06:g}" stroke-linecap="round" stroke-linejoin="round"/>')
+    body = pill + B.anim("pop", at + .1, .3, disc) + tick
+    body += B.text(ctx, txt, h * .9, h / 2 + size * .36, size, g, settle=False)
+    if cfg.get("doubt_at"):
+        dt = ctx.at(cfg["doubt_at"])
+        body += B.anim("fade", dt, .3, circle(cx, cy, h * .36, ctx.col("faint")))
+        qx, qy, qr = w - h * .12, -h * .08, h * .36
+        q = (circle(qx, qy, qr, ink) + f'<text x="{qx:g}" y="{qy + qr * .42:g}" text-anchor="middle" '
+             f'font-family="{B.esc(ctx.font("heavy"))}" font-size="{qr * 1.25:g}" font-weight="900" fill="#FFFFFF">?</text>')
+        body += B.anim("stamp", dt + .05, .35, q)
+        body = f'<g data-anim="shake" data-delay="{dt + .3:.4f}" data-amp="18">{body}</g>'
+    out = [f'<g transform="translate({x:g},{y:g})">{B.anim("pop", at, .45, body)}</g>']
+    if cfg.get("label"):
+        out.append(label(ctx, cfg["label"], cfg.get("label_at") or el["at"], x + 20, y - 50, 60,
+                         font="mono", weight=700, fill="muted", settle=False))
+    return "".join(out)
+
+
 KINDS = {"screenshot": screenshot_stamp, "repeat_flow": repeat_flow, "focus_network": focus_network,
          "time_stretch": time_stretch, "scan_grid": scan_grid, "capacity_gauges": capacity_gauges,
          "device_flow": device_flow, "condense": condense, "cross_check": cross_check, "lanes": lanes,
-         "rail": rail, "screen": screen, "desc_links": desc_links, "sanlian": sanlian, "tree": tree}
+         "rail": rail, "screen": screen, "desc_links": desc_links, "sanlian": sanlian, "tree": tree, "handoff": handoff, "layers": layers, "gate": gate, "verdict": verdict}
