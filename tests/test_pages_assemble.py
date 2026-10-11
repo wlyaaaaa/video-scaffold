@@ -21,7 +21,7 @@ class PagesAssembleTests(unittest.TestCase):
         self.spec = dict(parts=[dict(id="a", path="a.mp4"), dict(id="b", path="b.mp4")],
                          chapters=[dict(title="开场", **{"from": "a"}), dict(title="收尾", **{"from": "b"})], max_title_chars=6)
         self.write()
-        for name, duration, color in (("a", .5, "green"), ("b", .9, "blue")):
+        for name, duration, color in (("a", 1.0, "green"), ("b", .9, "blue")):
             run("ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i",
                 f"color=c={color}:s=320x180:r=60:d={duration}", "-f", "lavfi", "-i",
                 f"sine=frequency=440:sample_rate=48000:duration={duration}",
@@ -36,7 +36,7 @@ class PagesAssembleTests(unittest.TestCase):
                 self.write()
             before = {p: p.read_bytes() for p in self.root.iterdir()}
             plan = assembly.plan(self.manifest)
-            self.assertEqual((plan["fps"], plan["total_frames"], [c["frame"] for c in plan["chapters"]]), (60, 84, [0, 30]))
+            self.assertEqual((plan["fps"], plan["total_frames"], [c["frame"] for c in plan["chapters"]]), (60, 114, [0, 60]))
             self.assertEqual(before, {p: p.read_bytes() for p in self.root.iterdir()})
         for chapters in ([{"title": "晚", "from": "b"}], [{"title": "", "from": "a"}],
                          [{"title": "一二三四五六七", "from": "a"}], [{"title": "首", "from": "a"}, {"title": "复", "from": "a"}]):
@@ -50,9 +50,9 @@ class PagesAssembleTests(unittest.TestCase):
         before = {p: p.read_bytes() for p in self.root.iterdir()}
         result = assembly.assemble(self.manifest)
         info = json.loads(run("ffprobe", "-v", "error", "-count_frames", "-show_streams", "-show_format", "-of", "json", str(self.root / "joined.mp4")))
-        self.assertEqual(int(next(s for s in info["streams"] if s["codec_type"] == "video")["nb_read_frames"]), 84)
+        self.assertEqual(int(next(s for s in info["streams"] if s["codec_type"] == "video")["nb_read_frames"]), 114)
         for stream in [info["format"], *info["streams"]]:
-            self.assertLess(abs(float(stream["duration"]) - 1.4), 1 / 60)
+            self.assertLess(abs(float(stream["duration"]) - 1.9), 1 / 60)
         self.assertTrue(all(Path(result[key]).is_file() for key in ("chapters_path", "receipt_path")))
         before[Path(result["out"])] = Path(result["out"]).read_bytes()
         with self.assertRaises(FileExistsError):

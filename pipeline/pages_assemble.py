@@ -99,6 +99,8 @@ def plan(manifest):
     chapter_rows = [{**chapter, "frame": parts[pos]["start_frame"],
                      "seconds": parts[pos]["start_frame"] / FPS}
                     for chapter, pos in zip(chapters, positions)]
+    if len({int(row["seconds"]) for row in chapter_rows}) != len(chapter_rows):
+        raise ValueError("chapter timestamps must remain distinct after rounding down to seconds")
     return {"schema": "video-scaffold.pages-assembly.v1", "manifest": str(manifest),
             "fps": FPS, "pause_seconds": PAUSE, "fade_frames": FADE_FRAMES,
             "parts": parts, "chapters": chapter_rows, "total_frames": total,
